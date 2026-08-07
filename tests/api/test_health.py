@@ -27,13 +27,21 @@ def test_health_routes_are_included_in_openapi() -> None:
 
 
 def test_mysql_engine_uses_the_configured_settings() -> None:
-    engine = create_database_engine(Settings())
+    settings = Settings(
+        mysql_host="mysql.test",
+        mysql_port=3307,
+        mysql_database="test_database",
+        mysql_user="test_user",
+        mysql_password="test_password",
+    )
+    engine = create_database_engine(settings)
 
     try:
         assert engine.url.drivername == "mysql+pymysql"
-        assert engine.url.host == "127.0.0.1"
-        assert engine.url.database == "travel_assistant"
-        assert engine.url.username == "travel_assistant"
+        assert engine.url.host == "mysql.test"
+        assert engine.url.port == 3307
+        assert engine.url.database == "test_database"
+        assert engine.url.username == "test_user"
     finally:
         engine.dispose()
 
