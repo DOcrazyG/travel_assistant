@@ -1,12 +1,54 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
 [project]
 name = "travel-assistant"
 version = "0.1.0"
-description = "Add your description here"
+description = "Production-oriented backend foundation for a travel assistant."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "dotenv>=0.9.9",
-    "openai>=2.36.0",
-    "requests>=2.33.1",
-    "tavily-python>=0.7.24",
+    "alembic>=1.14,<2",
+    "fastapi>=0.115,<0.120",
+    "langchain>=1.0,<2",
+    "langchain-core>=1.0,<2",
+    "langchain-openai>=1.0,<2",
+    "langgraph>=1.0,<2",
+    "langsmith>=0.3,<1",
+    "psycopg[binary]>=3.2,<4",
+    "pydantic-settings>=2.7,<3",
+    "sqlmodel>=0.0.24,<1",
+    "uvicorn[standard]>=0.30,<1",
 ]
+
+[project.scripts]
+travel-assistant = "app.main:run"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app", "tools"]
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.0,<5",
+    "pyright>=1.1,<2",
+    "pytest>=8.0,<9",
+    "ruff>=0.8,<1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = ["alembic/versions"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"

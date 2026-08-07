@@ -1,0 +1,1 @@
+"""Travel assistant backend package."""
