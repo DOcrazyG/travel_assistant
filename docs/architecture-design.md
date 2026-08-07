@@ -29,7 +29,7 @@ This design takes inspiration from [fastapi-langgraph-agent-production-ready-tem
 
 - **Domain first:** Route handlers translate protocols only. Travel rules, tools, and Agent orchestration do not live in route handlers.
 - **Explicit state:** Use a typed LangGraph `StateGraph` for execution paths. Nodes return partial state updates only.
-- **Recoverable execution:** Every conversation has a stable `thread_id`; production uses PostgreSQL checkpoints instead of in-memory state.
+- **Recoverable execution:** Every conversation has a stable `thread_id`; production uses a durable checkpoint backend selected for the Agent in P2, never in-memory state.
 - **Controlled tools:** Tools use allowlists, parameter validation, timeouts, retries, and audit records. Results retain source and retrieval time.
 - **Progressive delivery:** Build an observable travel-advice loop first, then add long-term memory, parallel retrieval, evaluation, and human collaboration.
 - **Secure defaults:** Minimize personal-data retention. Load secrets only from the runtime environment. Require explicit confirmation for writes and future high-risk actions.
@@ -48,7 +48,7 @@ flowchart TB
     Tools --> Search[Attraction / Destination Search]
     Tools --> Maps[Route / Map Provider - later]
     Graph --> Memory[Memory Service]
-    Chat --> DB[(PostgreSQL + pgvector)]
+    Chat --> DB[(MySQL)]
     Graph --> DB
     MW --> Cache[(Redis / Valkey)]
     API --> Obs[Structured logs · Metrics · LLM tracing]
@@ -63,7 +63,7 @@ sequenceDiagram
     participant A as FastAPI
     participant G as Travel Graph
     participant T as Travel Tools
-    participant D as PostgreSQL
+    participant D as MySQL
 
     C->>A: POST /api/v1/conversations/{id}/messages
     A->>A: Authenticate, rate-limit, validate request
@@ -84,10 +84,10 @@ sequenceDiagram
 | API | FastAPI + Pydantic v2 | REST, SSE, OpenAPI, request and response validation |
 | Agent orchestration | LangGraph | Multi-turn state, conditional routing, tool loops, pause and resume |
 | LLM integration | `langchain-openai` in OpenAI-compatible mode | `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and `DEFAULT_LLM_MODEL` configuration |
-| Relational and session data | PostgreSQL + SQLModel/SQLAlchemy + Alembic | Users, conversations, messages, runs, and migrations |
-| LangGraph persistence | `PostgresSaver` | Checkpoints by `thread_id`, recovery, and replay |
+| System-management data | MySQL 8.4 + SQLModel/SQLAlchemy + Alembic | Users, conversations, messages, runs, and migrations |
+| LangGraph persistence | Durable checkpoint backend selected in P2 | Checkpoints by `thread_id`, recovery, and replay |
 | Cache and rate limiting | Redis or Valkey, with explicit in-memory development fallback | Hot-query cache, idempotency keys, and rate limits |
-| Vector retrieval (phase two) | pgvector | Semantic retrieval of confirmed preferences and facts |
+| Vector retrieval (phase two) | Dedicated vector store, selected in P4 | Semantic retrieval of confirmed preferences and facts |
 | Observability | Structured logging + Prometheus + LangSmith | Diagnostics, metrics, Agent tracing, and evaluation |
 | Delivery | Docker, Docker Compose, CI | Consistent local environments, deployment, and automated checks |
 
@@ -156,7 +156,7 @@ The repository currently retains only the baseline. Prompts and tools must be im
 
 - `travel_preferences`: budget range, party size, interests, dietary or accessibility needs, language, visited places, source, confirmation state, and expiration.
 - Read only `confirmed` preferences by default. Model-extracted preferences are stored as candidates and become long-term memory only after confirmation.
-- In phase two, create embeddings only for confirmed high-value data and retrieve them with user-scoped pgvector search. Do not indiscriminately store entire chat histories in a vector database.
+- In phase two, create embeddings only for confirmed high-value data and retrieve them through user-scoped vector search. Do not indiscriminately store entire chat histories in a vector database.
 
 ## 7. LangGraph design
 
@@ -255,9 +255,9 @@ Tool inputs and outputs use Pydantic schemas. Every external call has connection
 
 ## 11. Deployment and environments
 
-- Local: Docker Compose starts API, PostgreSQL with pgvector, and Redis or Valkey; Prometheus and Grafana are optional.
+- Local: Docker Compose starts MySQL and later Redis or Valkey; Prometheus and Grafana are optional.
 - Test: use an isolated database and secrets, apply migrations, then run unit, integration, API, and evaluation smoke tests.
-- Production: containerize the service, run Alembic migrations once, and run multiple API replicas. Session state lives in PostgreSQL or Redis, never in process memory.
+- Production: containerize the service, run Alembic migrations once, and run multiple API replicas. System-management data lives in MySQL; session and checkpoint storage are never held only in process memory.
 - Configure environments through environment variables. `.env.example` lists safe placeholders only; development, test, and production use separate values.
 
 ## 12. Release acceptance criteria

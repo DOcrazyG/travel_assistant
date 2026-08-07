@@ -44,7 +44,7 @@ flowchart LR
 
 - [ ] Design Pydantic request and response schemas plus a unified error format.
 - [ ] Build `api/v1` routes for health checks, conversation creation and retrieval, message retrieval, and message submission.
-- [ ] Add PostgreSQL, SQLModel/SQLAlchemy, and Alembic migrations for `users`, `conversations`, `messages`, `agent_runs`, and `tool_calls`.
+- [ ] Add MySQL, SQLModel/SQLAlchemy, and Alembic migrations for `users`, `conversations`, `messages`, `agent_runs`, and `tool_calls`.
 - [ ] Implement repository and service layers; route handlers must not construct SQL or call models directly.
 - [ ] Choose the first identity model: **recommended: JWT identities plus anonymous guest conversations**. Create a stable `thread_id` for every conversation.
 - [ ] Add request IDs, middleware logging context, a CORS allowlist, and base exception handling.
@@ -61,7 +61,7 @@ flowchart LR
 - [ ] Assemble `validate → load_memory → agent ↔ tools → compose → persist`.
 - [ ] Implement weather and attraction tools with LangGraph `ToolNode` and LangChain `@tool` functions.
 - [ ] Build an LLM Service for OpenAI-compatible configuration, model registration, call timeouts, retries, and configurable fallback models.
-- [ ] Integrate `PostgresSaver`; every graph call includes the conversation `thread_id`. Add recovery tests across service restarts.
+- [ ] Select and integrate a durable LangGraph checkpoint backend; every graph call includes the conversation `thread_id`. Add recovery tests across service restarts.
 - [ ] Implement SSE for `POST /messages` with status, token, tool-call, tool-result, final-response, and error events.
 - [ ] Add Pydantic parameter validation, connection/read timeouts, bounded retries, tool-call limits, source URLs, and retrieval timestamps to every tool.
 - [ ] Ask clarifying questions when destination, dates, or essential constraints are missing. Do not treat a model guess as a user constraint.
@@ -91,7 +91,7 @@ flowchart LR
 
 - [ ] Add `travel_preferences` plus explicit APIs for saving, viewing, changing, deleting, and auditing preferences.
 - [ ] Read confirmed preferences in the graph. Store model-extracted preferences as candidates until user confirmation.
-- [ ] Add pgvector for user-isolated semantic retrieval of confirmed preferences and high-value travel facts.
+- [ ] Select and add a vector store for user-isolated semantic retrieval of confirmed preferences and high-value travel facts.
 - [ ] Add destination facts, route/map, transit, and opening-hours tools only after provider review, source rules, cache policy, and tests for each.
 - [ ] Implement `build_itinerary` to create structured itinerary drafts using dates, budget, geography, and opening hours.
 - [ ] Use LangGraph `Send` only for independent retrieval tasks. Configure reducers, concurrency limits, and cost budgets before parallelizing.

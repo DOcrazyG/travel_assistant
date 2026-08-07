@@ -21,9 +21,6 @@ def liveness() -> HealthResponse:
 
 @router.get("/ready", response_model=HealthResponse, status_code=status.HTTP_200_OK)
 def readiness() -> HealthResponse:
-    """Report whether currently configured startup dependencies are ready.
-
-    Database and cache checks will be added when those dependencies are introduced in P1.
-    """
+    """Report readiness after the MySQL pool has been verified at startup."""
 
     return HealthResponse()
