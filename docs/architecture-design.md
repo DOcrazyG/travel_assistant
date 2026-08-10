@@ -29,7 +29,7 @@ This design takes inspiration from [fastapi-langgraph-agent-production-ready-tem
 
 - **Domain first:** Route handlers translate protocols only. Travel rules, tools, and Agent orchestration do not live in route handlers.
 - **Explicit state:** Use a typed LangGraph `StateGraph` for execution paths. Nodes return partial state updates only.
-- **Recoverable execution:** Every conversation has a stable `thread_id`; production uses a durable checkpoint backend selected for the Agent in P2, never in-memory state.
+- **Recoverable execution:** Every conversation has a public `conversation_id` and an internal stable `thread_id`; production uses a durable checkpoint backend selected for the Agent in P2, never in-memory state.
 - **Controlled tools:** Tools use allowlists, parameter validation, timeouts, retries, and audit records. Results retain source and retrieval time.
 - **Progressive delivery:** Build an observable travel-advice loop first, then add long-term memory, parallel retrieval, evaluation, and human collaboration.
 - **Secure defaults:** Minimize personal-data retention. Load secrets only from the runtime environment. Require explicit confirmation for writes and future high-risk actions.
@@ -143,14 +143,15 @@ The repository currently retains only the baseline. Prompts and tools must be im
 
 ### Conversation and short-term state
 
-- `users`: identity and status. The first release can support anonymous users or API-key principals.
-- `sessions`: login or access sessions. This can be deferred when the first release uses API keys only.
+- `users`: identity and status. The first release supports authenticated users only; anonymous conversations are out of scope.
+- `auth_sessions`: refresh-token sessions and JWT revocation state (`jti`, expiry, revoked timestamp, and device metadata). The identity provider may own these records when OIDC is adopted.
+- `api_keys`: hashed, scoped machine credentials linked to a service principal. They are distinct from user JWTs.
 - `conversations`: a continuous conversation linked to `user_id`, `thread_id`, title, and archive state.
 - `messages`: user, assistant, tool, and system messages with ordering, content, citations, and token usage.
 - `agent_runs`: graph-execution status, model, duration, errors, and trace ID.
 - `tool_calls`: tool name, redacted input, result summary, source, duration, and errors.
 
-`conversations.thread_id` is the unique join key for LangGraph checkpoints. API calls must provide or receive a server-created conversation; process memory must not represent production session state.
+`conversations.conversation_id` is the public, unguessable API identifier. It maps one-to-one to the internal `thread_id`, which is the unique join key for LangGraph checkpoints. API calls must provide or receive a server-created conversation; process memory must not represent production session state. The authenticated principal is checked against the conversation on every read, write, stream, and resume operation.
 
 ### Long-term preferences and memory
 
@@ -203,6 +204,8 @@ The graph may pause with `interrupt()` before saving preferences, generating a s
 
 ## 8. API design (v1)
 
+The complete request, response, streaming, identity, and concurrency contract lives in [Conversation API and identity contract](conversation-api-design.md). The API borrows the familiar OpenAI Chat Completions shape (`model`, `messages`, `stream`, `choices`, and `usage`) but deliberately does not promise drop-in compatibility with the OpenAI SDK. `conversation_id` is a documented application extension, not an OpenAI field.
+
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/health/live` | Process liveness probe |
@@ -214,8 +217,9 @@ The graph may pause with `interrupt()` before saving preferences, generating a s
 | `POST` | `/api/v1/conversations/{id}/resume` | Resume an interrupted approval or clarification flow |
 | `GET` | `/api/v1/preferences` | Read confirmed preferences |
 | `PUT` | `/api/v1/preferences` | Explicitly update preferences |
+| `POST` | `/v1/chat/completions` | OpenAI-shaped conversational invocation; creates or continues a conversation |
 
-SSE events use the types `meta`, `status`, `token`, `tool_call`, `tool_result`, `interrupt`, `final`, and `error`. Every event contains `request_id`, `conversation_id`, and `run_id`. Streaming and non-streaming responses use the same domain execution result rather than separate Agent implementations.
+SSE events use the types `meta`, `status`, `token`, `tool_call`, `tool_result`, `interrupt`, `final`, and `error`. Every event contains `request_id`, `conversation_id`, and `run_id`. The `/v1/chat/completions` stream represents text deltas using an OpenAI-shaped `chat.completion.chunk` payload, plus the documented application events. Streaming and non-streaming responses use the same domain execution result rather than separate Agent implementations.
 
 Errors follow a Problem Details-like shape with `code`, `message`, `request_id`, and optional safe-to-display `details`. Provider secrets, full stack traces, and unfiltered tool output are never returned to clients.
 
@@ -235,7 +239,11 @@ Tool inputs and outputs use Pydantic schemas. Every external call has connection
 
 ### Security
 
-- Use JWT or controlled API-key authentication in the first release. Inject identity into request context; never infer it from model text.
+- Require authenticated identities; do not support anonymous conversations in the first release. JWT access tokens identify logged-in users, and separately managed API keys identify machine principals. Inject the resolved principal into request context; never infer it from model text.
+- Use short-lived JWT access tokens and rotating refresh tokens. Validate issuer, audience, expiration, subject, and token ID; persist revocation and user-disable state. Prefer an external OIDC provider and JWKS-based asymmetric verification over implementing password login in this service.
+- API keys are stored only as hashes, shown only once at creation, scoped and rate-limited separately, and must not impersonate a user or access that user's conversations without an explicit future delegation model.
+- Enforce an ownership check before resolving a `conversation_id` to a `thread_id`. A valid token alone never authorizes a conversation.
+- Serialize active runs for each conversation and accept an `Idempotency-Key` for message submissions so retries cannot duplicate agent or tool execution.
 - Limit requests and concurrent streams by user and IP. Apply per-run tool-call counts, total duration, and cost budgets.
 - Use `.env` only for local development. Production secrets come from a secret manager. Redact secrets and personal data from logs, traces, and audit records.
 - Enforce user isolation in conversation reads, checkpoints, preference retrieval, cache keys, and evaluation datasets.
@@ -264,7 +272,7 @@ Tool inputs and outputs use Pydantic schemas. Every external call has connection
 
 The first production candidate must satisfy all of the following:
 
-- Multi-turn travel advice works through protected v1 APIs with SSE streaming.
+- Multi-turn travel advice works through protected v1 APIs with SSE streaming; all conversations belong to an authenticated user or service principal.
 - A conversation can resume its LangGraph state after a process restart.
 - Weather and attraction tools have schemas, timeouts, failure handling, and sources with retrieval times.
 - Every request has correlated logs, basic metrics, and an Agent trace.

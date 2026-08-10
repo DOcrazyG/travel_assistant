@@ -45,4 +45,5 @@ The original command-line Agent and travel-tool implementation have been removed
 ## Documentation
 
 - [Backend architecture design](docs/architecture-design.md)
+- [Conversation API and identity contract](docs/conversation-api-design.md)
 - [Iteration plan](docs/todo-plan.md)

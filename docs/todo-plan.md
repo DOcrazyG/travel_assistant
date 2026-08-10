@@ -46,7 +46,7 @@ flowchart LR
 - [ ] Build `api/v1` routes for health checks, conversation creation and retrieval, message retrieval, and message submission.
 - [ ] Add PostgreSQL, SQLModel/SQLAlchemy, and Alembic migrations for `users`, `conversations`, `messages`, `agent_runs`, and `tool_calls`.
 - [ ] Implement repository and service layers; route handlers must not construct SQL or call models directly.
-- [ ] Choose the first identity model: **recommended: JWT identities plus anonymous guest conversations**. Create a stable `thread_id` for every conversation.
+- [x] Choose the first identity model: authenticated users with JWT only; anonymous guest conversations are not supported. Machine integrations use separately managed API keys. Create a public `conversation_id` mapped one-to-one to a stable internal `thread_id` for every conversation.
 - [ ] Add request IDs, middleware logging context, a CORS allowlist, and base exception handling.
 - [ ] Add Redis or Valkey for idempotency keys and minimum rate limiting. An explicit in-memory fallback is allowed only in development.
 - [ ] Add API integration tests for unauthenticated requests, authorization failures, conversation isolation, pagination, and error format.
@@ -73,7 +73,7 @@ flowchart LR
 
 **Goal:** Make the service diagnosable, protected, and measurable.
 
-- [ ] Complete JWT, session revocation and expiration, password policy or external identity-provider strategy, and security-event logging.
+- [ ] Complete JWT validation, refresh-session rotation, revocation and expiration, external identity-provider integration (preferred over local password login), and security-event logging.
 - [ ] Define rate limits by user, IP, and API key, concurrent-stream limits, and LLM/tool duration and cost budgets.
 - [ ] Define four failure strategies: retry transient errors, return model-recoverable errors to the graph, clarify user-fixable errors, and alert on unexpected errors.
 - [ ] Add structured logs and redaction rules for `request_id`, `conversation_id`, `thread_id`, `run_id`, and trace IDs.
@@ -115,11 +115,16 @@ flowchart LR
 
 ## Decisions to confirm before P1
 
-- [ ] First identity model: API keys only, anonymous conversations, or JWT login?
+- [x] First identity model: authenticated-user JWTs only; no anonymous conversations. API keys are a separate service-principal credential.
+- [x] API compatibility target: OpenAI Chat Completions-inspired request/response and streaming semantics, not zero-change OpenAI SDK compatibility.
+- [x] Conversation creation: the first chat request creates a conversation automatically; later requests send the returned `conversation_id`.
+- [x] Self-managed accounts: not in the first release; prefer an external OIDC/unified identity provider.
+- [x] Token lifecycle: short-lived access JWTs, rotating refresh sessions, and server-side revocation state.
+- [x] Concurrent writes: one active run per conversation plus idempotency keys for submissions.
 - [ ] First LLM provider and fallback model. Must arbitrary OpenAI-compatible endpoints remain supported?
 - [ ] Deployment target: single-host Docker Compose, managed containers, or Kubernetes?
 - [ ] Is live route, traffic, or opening-hours data needed? Which regions and budget limits apply?
-- [ ] Will sensitive preferences, companion details, or precise locations be stored? What retention policy applies?
+- [ ] Will sensitive preferences, companion details, or precise locations be stored? Confirm the exact retention periods for conversations, checkpoints, audit logs, and deleted-data purge jobs.
 - [ ] Observability choice: LangSmith (recommended) or an existing Langfuse installation? Who owns access and cost?
 - [ ] Are languages beyond Chinese required? What are the default timezone and currency rules?
 
