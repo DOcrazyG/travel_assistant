@@ -143,8 +143,10 @@ The repository currently retains only the baseline. Prompts and tools must be im
 
 ### Conversation and short-term state
 
+The complete business schema, index strategy, retention, MinIO attachment boundary, and LangGraph schema boundary are defined in [Database design](database-design.md).
+
 - `users`: identity and status. The first release supports authenticated users only; anonymous conversations are out of scope.
-- `auth_sessions`: refresh-token sessions and JWT revocation state (`jti`, expiry, revoked timestamp, and device metadata). The identity provider may own these records when OIDC is adopted.
+- `auth_sessions`, `refresh_tokens`, and `revoked_access_tokens`: self-managed password-login sessions, rotating refresh tokens, and JWT revocation state (`jti`, expiry, revoked timestamp, and minimal device metadata).
 - `api_keys`: hashed, scoped machine credentials linked to a service principal. They are distinct from user JWTs.
 - `conversations`: a continuous conversation linked to `user_id`, `thread_id`, title, and archive state.
 - `messages`: user, assistant, tool, and system messages with ordering, content, citations, and token usage.
@@ -192,7 +194,7 @@ flowchart LR
 ```
 
 - `validate`: validates destination, dates, budget, and other constraints. It asks a clarifying question instead of calling external tools when essential details are missing.
-- `load_memory`: reads confirmed preferences by user; it is skipped for anonymous users.
+- `load_memory`: reads confirmed preferences for the authenticated user; it is skipped when that user has no confirmed preferences.
 - `agent`: selects tools and plans the next step. It may only call registered tools.
 - `tools`: runs through LangGraph `ToolNode`; tool failures are returned as recoverable results to the Agent. Transient network failures have bounded retries and timeouts.
 - `compose`: produces advice, rationale, citations, data freshness, and uncertainty notices.
@@ -240,7 +242,7 @@ Tool inputs and outputs use Pydantic schemas. Every external call has connection
 ### Security
 
 - Require authenticated identities; do not support anonymous conversations in the first release. JWT access tokens identify logged-in users, and separately managed API keys identify machine principals. Inject the resolved principal into request context; never infer it from model text.
-- Use short-lived JWT access tokens and rotating refresh tokens. Validate issuer, audience, expiration, subject, and token ID; persist revocation and user-disable state. Prefer an external OIDC provider and JWKS-based asymmetric verification over implementing password login in this service.
+- Use short-lived JWT access tokens and rotating refresh tokens. Validate issuer, audience, expiration, subject, and token ID; persist revocation and user-disable state. The first release owns password login and uses Argon2id password hashes; an external OIDC provider remains a future integration option.
 - API keys are stored only as hashes, shown only once at creation, scoped and rate-limited separately, and must not impersonate a user or access that user's conversations without an explicit future delegation model.
 - Enforce an ownership check before resolving a `conversation_id` to a `thread_id`. A valid token alone never authorizes a conversation.
 - Serialize active runs for each conversation and accept an `Idempotency-Key` for message submissions so retries cannot duplicate agent or tool execution.

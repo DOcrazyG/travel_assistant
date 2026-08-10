@@ -73,7 +73,7 @@ flowchart LR
 
 **Goal:** Make the service diagnosable, protected, and measurable.
 
-- [ ] Complete JWT validation, refresh-session rotation, revocation and expiration, external identity-provider integration (preferred over local password login), and security-event logging.
+- [ ] Complete self-managed account registration/login, Argon2id password hashing, JWT validation, refresh-session rotation, revocation and expiration, and security-event logging.
 - [ ] Define rate limits by user, IP, and API key, concurrent-stream limits, and LLM/tool duration and cost budgets.
 - [ ] Define four failure strategies: retry transient errors, return model-recoverable errors to the graph, clarify user-fixable errors, and alert on unexpected errors.
 - [ ] Add structured logs and redaction rules for `request_id`, `conversation_id`, `thread_id`, `run_id`, and trace IDs.
@@ -118,13 +118,13 @@ flowchart LR
 - [x] First identity model: authenticated-user JWTs only; no anonymous conversations. API keys are a separate service-principal credential.
 - [x] API compatibility target: OpenAI Chat Completions-inspired request/response and streaming semantics, not zero-change OpenAI SDK compatibility.
 - [x] Conversation creation: the first chat request creates a conversation automatically; later requests send the returned `conversation_id`.
-- [x] Self-managed accounts: not in the first release; prefer an external OIDC/unified identity provider.
+- [x] Self-managed accounts: included in the first release, with Argon2id password hashes, email verification, password reset, JWT access tokens, and rotating refresh tokens.
 - [x] Token lifecycle: short-lived access JWTs, rotating refresh sessions, and server-side revocation state.
 - [x] Concurrent writes: one active run per conversation plus idempotency keys for submissions.
 - [ ] First LLM provider and fallback model. Must arbitrary OpenAI-compatible endpoints remain supported?
 - [ ] Deployment target: single-host Docker Compose, managed containers, or Kubernetes?
 - [ ] Is live route, traffic, or opening-hours data needed? Which regions and budget limits apply?
-- [ ] Will sensitive preferences, companion details, or precise locations be stored? Confirm the exact retention periods for conversations, checkpoints, audit logs, and deleted-data purge jobs.
+- [x] Sensitive data and retention: do not persist identity documents, contact details, or precise locations; store accessibility/dietary preferences only after confirmation. Retain conversations/checkpoints and run/tool audit data for 180 days after last activity; make explicit deletions unavailable immediately and physically purge within 30 days; retain security audit data for 365 days, idempotency records for 24 hours, and backups for 35 days.
 - [ ] Observability choice: LangSmith (recommended) or an existing Langfuse installation? Who owns access and cost?
 - [ ] Are languages beyond Chinese required? What are the default timezone and currency rules?
 

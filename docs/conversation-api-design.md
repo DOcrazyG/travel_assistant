@@ -1,6 +1,6 @@
 # Conversation API and Identity Contract
 
-**Status:** Proposed and confirmed for P1 except where marked “Open decision”  
+**Status:** Approved design for P1; implementation pending
 **Last updated:** 2026-08-10  
 **Applies to:** Authenticated conversational calls, conversation ownership, and LangGraph state recovery
 
@@ -38,7 +38,7 @@ All user-facing requests use `Authorization: Bearer <access-token>`. The access 
 
 Access-token expiry alone is insufficient for account disablement and logout. Refresh sessions are persisted and rotated; the associated token ID or session must be revocable. A refresh token is never sent to the Agent, stored in a conversation, or exposed to browser JavaScript when an HttpOnly cookie flow is available.
 
-The initial product does not implement passwords, registration, or its own password grant. It should integrate with a unified/OIDC identity provider and validate its signed JWTs through the provider's JWKS. Local development may use a dedicated development issuer that follows the same claim contract.
+The initial product owns registration, login, email verification, password reset, and refresh-token rotation. Passwords are hashed with Argon2id and never logged or returned. The service signs its own access JWTs from a tightly managed signing key; a future OIDC integration can replace this issuer behind the same principal contract.
 
 ### Machine access
 
@@ -163,7 +163,7 @@ The service minimizes stored personal data. Conversation messages, LangGraph che
 
 An API deletion makes a conversation unavailable immediately, then a background purge removes eligible data and records a minimal deletion audit event. Backups follow their own bounded lifecycle and are not edited in place.
 
-**Open decision before release:** product and legal owners must set exact retention values for conversations, checkpoints, audit/security logs, idempotency records, and backup purge. Until then, no duration should be implied by this document.
+Default retention is 180 days after last activity for conversations, messages, checkpoints, and run/tool audit data; security audit data is retained for 365 days; idempotency records for 24 hours; and backups for 35 days. An explicit deletion makes data unavailable immediately and is physically purged within 30 days, subject to the backup lifecycle. Identity documents, contact details, and precise locations are not persisted in the first release.
 
 ## 8. Error and observability contract
 
@@ -184,9 +184,9 @@ The API never returns provider credentials, raw stack traces, unredacted tool in
 
 - Authenticated users only; no guest/anonymous conversation mode.
 - JWT is the user-facing access credential; use short-lived access tokens, rotating refresh sessions, and revocation state.
-- Do not build first-party password registration/login in the first release; prefer OIDC or an existing identity system.
+- Build first-party registration/login with Argon2id password hashes, email verification, password reset, and rotating refresh tokens; preserve the principal boundary for a future OIDC integration.
 - API keys are separate machine credentials with service-principal isolation.
 - The first chat call auto-creates a conversation; subsequent calls provide `conversation_id`.
 - Follow OpenAI-style request, response, and streaming conventions without claiming drop-in SDK compatibility.
 - One active run per conversation and idempotency protection for submissions.
-- Retention and deletion support are required, but exact durations remain an explicit open product decision.
+- Retention periods are 180 days for conversation/checkpoint/run data, 365 days for security audit data, 24 hours for idempotency records, and 35 days for backups; explicit deletion is immediately effective and purged within 30 days.
