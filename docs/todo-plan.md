@@ -1,6 +1,6 @@
 # Travel Assistant Backend Iteration Plan
 
-**Status:** P0 complete; later milestones not started  
+**Status:** P0 complete; P1 database schema and migration foundation complete
 **Related design:** [Travel Assistant Backend Architecture Design](architecture-design.md)  
 **Planning approach:** Deliver milestones with explicit acceptance criteria. Expand scope only after the preceding milestone is complete.
 
@@ -44,7 +44,7 @@ flowchart LR
 
 - [ ] Design Pydantic request and response schemas plus a unified error format.
 - [ ] Build `api/v1` routes for health checks, conversation creation and retrieval, message retrieval, and message submission.
-- [ ] Add PostgreSQL, SQLModel/SQLAlchemy, and Alembic migrations for `users`, `conversations`, `messages`, `agent_runs`, and `tool_calls`.
+- [x] Add PostgreSQL, SQLModel/SQLAlchemy, and Alembic migrations for application-owned identity, conversation, message, run, tool-call, attachment, audit, and future-extension tables. The full schema is defined up front; product capabilities activate incrementally.
 - [ ] Implement repository and service layers; route handlers must not construct SQL or call models directly.
 - [x] Choose the first identity model: authenticated users with JWT only; anonymous guest conversations are not supported. Machine integrations use separately managed API keys. Create a public `conversation_id` mapped one-to-one to a stable internal `thread_id` for every conversation.
 - [ ] Add request IDs, middleware logging context, a CORS allowlist, and base exception handling.

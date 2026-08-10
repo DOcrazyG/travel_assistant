@@ -1,12 +1,15 @@
 # Travel Assistant Database Design
 
-**Status:** Approved design; no migrations or runtime code implemented  
-**Last updated:** 2026-08-10  
+**Status:** SQLModel definitions and the initial Alembic migration implemented
+**Last updated:** 2026-08-10
 **Database:** PostgreSQL 16 for relational data and LangGraph checkpoints; MinIO for attachment objects
+
+Migration commands, revision-review rules, deployment sequencing, and ownership
+boundaries are documented in the [Database migration guide](database-migrations.md).
 
 ## 1. Scope and decisions
 
-This document defines the target relational design for the first release and the tables that should be introduced by later migrations. It is deliberately broader than P1 so the initial schema preserves the boundaries needed for authentication, service API keys, history display, audit, retention, attachments, and future confirmed travel preferences. Tables are still introduced incrementally.
+This document defines the target relational design for the first release. The initial Alembic revision creates all current application-owned tables so foreign-key and tenant-isolation boundaries are stable from the outset. Product capabilities are enabled incrementally; a capability must not use a table before its service, authorization, and retention behavior are implemented.
 
 Confirmed decisions:
 
@@ -103,6 +106,7 @@ Constraints and indexes: `UNIQUE (id, tenant_id)`; `INDEX (tenant_id, status) WH
 | Column | Type | Constraints / meaning |
 | --- | --- | --- |
 | `principal_id` | `uuid` | PK; FK → `principals(id)`; must reference a `user` principal |
+| `tenant_id` | `uuid` | Composite FK with `principal_id` → `principals`; the user's personal tenant |
 | `email` | `text` | Original display form; not null |
 | `email_normalized` | `text` | Trimmed/lowercase login lookup value; not null |
 | `password_hash` | `text` | Argon2id encoded hash only |
@@ -166,9 +170,9 @@ Indexes: PK `id`; `UNIQUE (token_hash)`; `INDEX (session_id, issued_at DESC)`; `
 
 `auth_one_time_tokens` supports email verification and password reset. Columns are `id` (PK), `user_principal_id` (not null), `purpose` (`email_verify` or `password_reset`), `token_hash` (unique), `expires_at`, `consumed_at`, `created_at`, `request_ip_hash`, and `request_user_agent`. Index `(user_principal_id, purpose, created_at DESC)` supports rate limiting and invalidating earlier tokens; `expires_at` supports purge.
 
-### `service_principals` and `api_keys` — P3 migration
+### `service_principals` and `api_keys` — P3 capability
 
-`service_principals.principal_id` is a PK/FK to `principals`, with `name`, `description`, `created_by_user_principal_id`, and lifecycle timestamps. It must reference `kind = 'service'`.
+`service_principals.principal_id` is a PK/FK to `principals`, with `tenant_id`, `name`, `description`, `created_by_user_principal_id`, and lifecycle timestamps. The `(principal_id, tenant_id)` pair is a composite FK to `principals` and must reference `kind = 'service'`.
 
 `api_keys` supports several keys per service principal:
 
@@ -352,7 +356,7 @@ Columns: `id` (PK UUID), `tenant_id`, `requested_by_principal_id` (nullable for 
 
 Indexes: `INDEX (status, purge_after_at)` for workers; `INDEX (tenant_id, target_type, target_id)`; `INDEX (completed_at)`. An explicit conversation deletion sets the conversation's `deleted_at` immediately and creates a request with `purge_after_at = deleted_at + 30 days`. Retention creates the same type of request after 180 days of inactivity.
 
-### `travel_preferences` — P4 migration
+### `travel_preferences` — P4 capability
 
 Only confirmed, user-managed preferences become long-term data. Candidate extraction remains in `agent_runs`/messages until the user confirms it.
 
@@ -395,12 +399,12 @@ The purge worker's order for a conversation is: block access → end/cancel acti
 
 | Migration stage | Tables / changes | Purpose |
 | --- | --- | --- |
-| P1-A | `tenants`, `principals`, `users`, `tenant_memberships`, auth token/session tables, `security_audit_events` | Registration, login, token lifecycle, tenant isolation |
-| P1-B | `conversations`, `messages`, `agent_runs`, `idempotency_keys`, `data_deletion_requests`, attachment schema | Authenticated text conversations, frontend history, and a durable run lifecycle; attachments are schema-only |
+| Initial baseline | All current `app` tables, constraints, indexes, and `timestamptz` columns | Establish stable identity, tenant, history, attachment, operational, and future-extension boundaries |
+| P1 | Registration/login plus authenticated text conversations | Activate the required auth, conversation, message, run, idempotency, and history paths |
 | P1-C | MinIO bucket/lifecycle policy, presigned upload flow, scan worker integration | Enable image/file upload and display without Agent parsing |
-| P2 | `tool_calls`, `message_citations`; deploy `langgraph` checkpointer schema and activate Agent-run execution | Recoverable Agent execution and source history |
-| P3 | `service_principals`, `api_keys`; extend audit/operational indexes | Machine clients, API-key limits, operational safeguards |
-| P4 | `travel_preferences` and a separately selected vector/retrieval store | Explicitly confirmed long-term memory |
+| P2 | Deploy `langgraph` checkpointer schema and activate Agent-run execution, tool calls, and citations | Recoverable Agent execution and source history |
+| P3 | Activate `service_principals` and `api_keys`; extend audit/operational behavior | Machine clients, API-key limits, operational safeguards |
+| P4 | Activate `travel_preferences` and add a separately selected vector/retrieval store | Explicitly confirmed long-term memory |
 
 Every migration includes its foreign keys, checks, indexes, and a rollback assessment. `PostgresSaver` schema setup is deployed as a dedicated, idempotent infrastructure step rather than folded into application ORM metadata.
 

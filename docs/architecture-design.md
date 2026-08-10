@@ -1,7 +1,7 @@
 # Travel Assistant Backend Architecture Design
 
-**Status:** Proposal  
-**Last updated:** 2026-08-07  
+**Status:** Approved target architecture; P0 and database-migration foundation implemented
+**Last updated:** 2026-08-10
 **Applies to:** Building a deployable, maintainable FastAPI and LangGraph service from the engineering baseline
 
 ## 1. Context and goals
@@ -137,7 +137,9 @@ Exact versions are locked in `pyproject.toml` and `uv.lock`. New Agent code uses
 └── pyproject.toml
 ```
 
-The repository currently retains only the baseline. Prompts and tools must be implemented directly in the modules above; no previous prototype is migrated.
+The repository currently includes the engineering baseline, SQLModel table metadata,
+and Alembic migration foundation. Prompts and tools must be implemented directly in
+the modules above; no previous prototype is migrated.
 
 ## 6. Core domain and data model
 
