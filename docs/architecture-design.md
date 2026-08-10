@@ -48,7 +48,7 @@ flowchart TB
     Tools --> Search[Attraction / Destination Search]
     Tools --> Maps[Route / Map Provider - later]
     Graph --> Memory[Memory Service]
-    Chat --> DB[(MySQL)]
+    Chat --> DB[(PostgreSQL)]
     Graph --> DB
     MW --> Cache[(Redis / Valkey)]
     API --> Obs[Structured logs · Metrics · LLM tracing]
@@ -63,7 +63,7 @@ sequenceDiagram
     participant A as FastAPI
     participant G as Travel Graph
     participant T as Travel Tools
-    participant D as MySQL
+    participant D as PostgreSQL
 
     C->>A: POST /api/v1/conversations/{id}/messages
     A->>A: Authenticate, rate-limit, validate request
@@ -84,8 +84,8 @@ sequenceDiagram
 | API | FastAPI + Pydantic v2 | REST, SSE, OpenAPI, request and response validation |
 | Agent orchestration | LangGraph | Multi-turn state, conditional routing, tool loops, pause and resume |
 | LLM integration | `langchain-openai` in OpenAI-compatible mode | `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and `DEFAULT_LLM_MODEL` configuration |
-| System-management data | MySQL 8.4 + SQLModel/SQLAlchemy + Alembic | Users, conversations, messages, runs, and migrations |
-| LangGraph persistence | Durable checkpoint backend selected in P2 | Checkpoints by `thread_id`, recovery, and replay |
+| System-management data | PostgreSQL 16 + SQLModel/SQLAlchemy + Alembic | Users, conversations, messages, runs, and migrations |
+| LangGraph persistence | `PostgresSaver` on PostgreSQL | Checkpoints by `thread_id`, recovery, and replay |
 | Cache and rate limiting | Redis or Valkey, with explicit in-memory development fallback | Hot-query cache, idempotency keys, and rate limits |
 | Vector retrieval (phase two) | Dedicated vector store, selected in P4 | Semantic retrieval of confirmed preferences and facts |
 | Observability | Structured logging + Prometheus + LangSmith | Diagnostics, metrics, Agent tracing, and evaluation |
@@ -255,9 +255,9 @@ Tool inputs and outputs use Pydantic schemas. Every external call has connection
 
 ## 11. Deployment and environments
 
-- Local: Docker Compose starts MySQL and later Redis or Valkey; Prometheus and Grafana are optional.
+- Local: Docker Compose starts PostgreSQL and later Redis or Valkey; Prometheus and Grafana are optional.
 - Test: use an isolated database and secrets, apply migrations, then run unit, integration, API, and evaluation smoke tests.
-- Production: containerize the service, run Alembic migrations once, and run multiple API replicas. System-management data lives in MySQL; session and checkpoint storage are never held only in process memory.
+- Production: containerize the service, run Alembic migrations once, and run multiple API replicas. System-management data and LangGraph checkpoints live in PostgreSQL; session and checkpoint storage are never held only in process memory.
 - Configure environments through environment variables. `.env.example` lists safe placeholders only; development, test, and production use separate values.
 
 ## 12. Release acceptance criteria

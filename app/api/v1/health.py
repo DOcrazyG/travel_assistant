@@ -21,6 +21,6 @@ def liveness() -> HealthResponse:
 
 @router.get("/ready", response_model=HealthResponse, status_code=status.HTTP_200_OK)
 def readiness() -> HealthResponse:
-    """Report readiness after the MySQL pool has been verified at startup."""
+    """Report readiness after the PostgreSQL pool has been verified at startup."""
 
     return HealthResponse()

@@ -15,9 +15,10 @@ dependencies = [
     "langchain-core>=1.0,<2",
     "langchain-openai>=1.0,<2",
     "langgraph>=1.0,<2",
+    "langgraph-checkpoint-postgres>=3.0,<4",
     "langsmith>=0.3,<1",
-    "pymysql>=1.1,<2",
     "pydantic-settings>=2.7,<3",
+    "psycopg[binary,pool]>=3.2,<4",
     "sqlmodel>=0.0.24,<1",
     "uvicorn[standard]>=0.30,<1",
 ]

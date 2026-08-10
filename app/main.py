@@ -9,14 +9,19 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.v1.router import api_router
 from app.core.config import Settings, get_settings
-from app.core.database import check_database_connection, create_database_engine
+from app.core.database import (
+    check_database_connection,
+    create_database_engine,
+    ensure_database_exists,
+)
 
 
 @asynccontextmanager
 async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
-    """Create, verify, and dispose of the MySQL connection pool."""
+    """Create, verify, and dispose of the PostgreSQL connection pool."""
 
     settings: Settings = application.state.settings
+    ensure_database_exists(settings)
     engine = create_database_engine(settings)
     try:
         check_database_connection(engine)

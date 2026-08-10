@@ -21,7 +21,7 @@ run:
 	uv run uvicorn app.main:app --reload
 
 up:
-	docker compose up -d mysql
+	docker compose up -d postgres
 
 down:
 	docker compose down

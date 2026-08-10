@@ -1,22 +1,21 @@
 services:
-  mysql:
-    image: mysql:8.4
-    container_name: travel-assistant-mysql
+  postgres:
+    image: postgres:16-alpine
+    container_name: travel-assistant-postgres
     restart: unless-stopped
     environment:
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-travel_assistant}
-      MYSQL_USER: ${MYSQL_USER:-travel_assistant}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-travel_assistant}
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      POSTGRES_DB: ${POSTGRES_DATABASE:-travel_assistant}
+      POSTGRES_USER: ${POSTGRES_USER:-travel_assistant}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-travel_assistant}
     ports:
-      - "${MYSQL_PORT:-3306}:3306"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - mysql_data:/var/lib/mysql
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test:
         [
           "CMD-SHELL",
-          "mysqladmin ping -h localhost -u$$MYSQL_USER -p$$MYSQL_PASSWORD --silent",
+          "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB",
         ]
       interval: 10s
       timeout: 5s
@@ -24,4 +23,4 @@ services:
       start_period: 30s
 
 volumes:
-  mysql_data:
+  postgres_data:
