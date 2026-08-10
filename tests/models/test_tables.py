@@ -39,9 +39,7 @@ def test_all_application_tables_are_registered_in_the_app_schema() -> None:
     }
 
     registered_tables = {
-        table.name
-        for table in SQLModel.metadata.tables.values()
-        if table.schema == APP_SCHEMA
+        table.name for table in SQLModel.metadata.tables.values() if table.schema == APP_SCHEMA
     }
 
     assert registered_tables == expected_tables
@@ -52,15 +50,9 @@ def test_conversation_history_and_run_indexes_are_declared() -> None:
     messages = SQLModel.metadata.tables[f"{APP_SCHEMA}.messages"]
     agent_runs = SQLModel.metadata.tables[f"{APP_SCHEMA}.agent_runs"]
 
-    assert "ix_conversations_owner_history" in {
-        index.name for index in conversations.indexes
-    }
-    assert "ix_messages_conversation_history" in {
-        index.name for index in messages.indexes
-    }
-    assert "uq_agent_runs_active_conversation" in {
-        index.name for index in agent_runs.indexes
-    }
+    assert "ix_conversations_owner_history" in {index.name for index in conversations.indexes}
+    assert "ix_messages_conversation_history" in {index.name for index in messages.indexes}
+    assert "uq_agent_runs_active_conversation" in {index.name for index in agent_runs.indexes}
 
 
 def test_uuid7_defaults_are_uuid_version_seven() -> None:
@@ -73,9 +65,7 @@ def test_uuid7_defaults_are_uuid_version_seven() -> None:
 def test_all_models_compile_to_postgresql_ddl() -> None:
     dialect = postgresql.dialect()
     application_tables = [
-        table
-        for table in SQLModel.metadata.tables.values()
-        if table.schema == APP_SCHEMA
+        table for table in SQLModel.metadata.tables.values() if table.schema == APP_SCHEMA
     ]
 
     for table in application_tables:
@@ -86,9 +76,7 @@ def test_all_models_compile_to_postgresql_ddl() -> None:
 
 def test_all_datetime_columns_use_timezone_aware_postgresql_types() -> None:
     application_tables = [
-        table
-        for table in SQLModel.metadata.tables.values()
-        if table.schema == APP_SCHEMA
+        table for table in SQLModel.metadata.tables.values() if table.schema == APP_SCHEMA
     ]
 
     datetime_columns = [
@@ -104,9 +92,7 @@ def test_all_datetime_columns_use_timezone_aware_postgresql_types() -> None:
 
 def test_composite_foreign_keys_reference_unique_parent_keys() -> None:
     application_tables = [
-        table
-        for table in SQLModel.metadata.tables.values()
-        if table.schema == APP_SCHEMA
+        table for table in SQLModel.metadata.tables.values() if table.schema == APP_SCHEMA
     ]
 
     for table in application_tables:
@@ -115,9 +101,7 @@ def test_composite_foreign_keys_reference_unique_parent_keys() -> None:
                 continue
 
             parent_table = foreign_key.elements[0].column.table
-            referenced_columns = tuple(
-                element.column.name for element in foreign_key.elements
-            )
+            referenced_columns = tuple(element.column.name for element in foreign_key.elements)
             parent_keys = {
                 tuple(constraint.columns.keys())
                 for constraint in parent_table.constraints

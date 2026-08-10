@@ -78,9 +78,7 @@ class ApiKey(SQLModel, table=True):
     service_principal_id: UUID = Field(index=True)
     name: str = Field(max_length=200)
     key_prefix: str = Field(max_length=32)
-    secret_hash: bytes = Field(
-        sa_column=Column(LargeBinary, nullable=False, unique=True)
-    )
+    secret_hash: bytes = Field(sa_column=Column(LargeBinary, nullable=False, unique=True))
     scopes: list[str] = Field(
         default_factory=list,
         sa_column=Column(JSONB, nullable=False, server_default=text("'[]'::jsonb")),

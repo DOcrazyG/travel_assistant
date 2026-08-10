@@ -54,9 +54,7 @@ class AgentRun(TimestampedModel, table=True):
             postgresql_where=text("status IN ('queued', 'running', 'interrupted')"),
         ),
         Index("ix_agent_runs_conversation_created", "conversation_id", "created_at"),
-        Index(
-            "ix_agent_runs_tenant_status_created", "tenant_id", "status", "created_at"
-        ),
+        Index("ix_agent_runs_tenant_status_created", "tenant_id", "status", "created_at"),
         Index(
             "ix_agent_runs_terminal_completed",
             "completed_at",
@@ -109,9 +107,7 @@ class ToolCall(SQLModel, table=True):
             name="ck_tool_calls_status",
         ),
         Index("uq_tool_calls_run_sequence", "agent_run_id", "sequence", unique=True),
-        Index(
-            "ix_tool_calls_tenant_tool_created", "tenant_id", "tool_name", "created_at"
-        ),
+        Index("ix_tool_calls_tenant_tool_created", "tenant_id", "tool_name", "created_at"),
         Index(
             "ix_tool_calls_active",
             "status",

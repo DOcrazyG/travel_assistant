@@ -106,9 +106,7 @@ class SecurityAuditEvent(SQLModel, table=True):
     event_type: str = Field(max_length=100)
     outcome: str = Field(max_length=16)
     request_id: UUID | None = Field(default=None, index=True)
-    ip_hash: bytes | None = Field(
-        default=None, sa_column=Column(LargeBinary, nullable=True)
-    )
+    ip_hash: bytes | None = Field(default=None, sa_column=Column(LargeBinary, nullable=True))
     user_agent: str | None = Field(default=None, max_length=512)
     details: dict[str, Any] = Field(
         default_factory=dict,
@@ -135,9 +133,7 @@ class DataDeletionRequest(SQLModel, table=True):
             name="ck_data_deletion_requests_status",
         ),
         Index("ix_data_deletion_requests_due", "status", "purge_after_at"),
-        Index(
-            "ix_data_deletion_requests_target", "tenant_id", "target_type", "target_id"
-        ),
+        Index("ix_data_deletion_requests_target", "tenant_id", "target_type", "target_id"),
         Index("ix_data_deletion_requests_completed", "completed_at"),
         {"schema": APP_SCHEMA},
     )

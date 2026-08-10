@@ -22,13 +22,7 @@ def new_uuid7() -> UUID:
     """Generate an RFC 9562 UUIDv7 on Python versions without ``uuid.uuid7``."""
 
     timestamp_ms = time_ns() // 1_000_000
-    value = (
-        (timestamp_ms << 80)
-        | (0x7 << 76)
-        | (randbits(12) << 64)
-        | (0b10 << 62)
-        | randbits(62)
-    )
+    value = (timestamp_ms << 80) | (0x7 << 76) | (randbits(12) << 64) | (0b10 << 62) | randbits(62)
     return UUID(int=value)
 
 

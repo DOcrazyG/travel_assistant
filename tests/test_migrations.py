@@ -12,9 +12,7 @@ def test_migration_history_has_one_head_and_an_initial_schema_revision() -> None
 
     assert len(script.get_heads()) == 1
 
-    initial_revision = next(
-        revision for revision in revisions if revision.down_revision is None
-    )
+    initial_revision = next(revision for revision in revisions if revision.down_revision is None)
 
     migration_source = Path(initial_revision.path).read_text(encoding="utf-8")
     assert 'op.execute("CREATE SCHEMA IF NOT EXISTS app")' in migration_source

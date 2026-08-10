@@ -47,9 +47,7 @@ class AuthSession(SQLModel, table=True):
     revoked_at: datetime | None = utc_datetime_field(default=None)
     revoked_reason: str | None = Field(default=None, max_length=100)
     user_agent: str | None = Field(default=None, max_length=512)
-    ip_hash: bytes | None = Field(
-        default=None, sa_column=Column(LargeBinary, nullable=True)
-    )
+    ip_hash: bytes | None = Field(default=None, sa_column=Column(LargeBinary, nullable=True))
 
 
 class RefreshToken(SQLModel, table=True):
@@ -64,16 +62,12 @@ class RefreshToken(SQLModel, table=True):
 
     id: UUID = Field(default_factory=new_uuid7, primary_key=True)
     session_id: UUID = Field(foreign_key=f"{APP_SCHEMA}.auth_sessions.id", index=True)
-    token_hash: bytes = Field(
-        sa_column=Column(LargeBinary, nullable=False, unique=True)
-    )
+    token_hash: bytes = Field(sa_column=Column(LargeBinary, nullable=False, unique=True))
     issued_at: datetime = utc_datetime_field(default_factory=utc_now)
     expires_at: datetime = utc_datetime_field()
     consumed_at: datetime | None = utc_datetime_field(default=None)
     revoked_at: datetime | None = utc_datetime_field(default=None)
-    replaced_by_id: UUID | None = Field(
-        default=None, foreign_key=f"{APP_SCHEMA}.refresh_tokens.id"
-    )
+    replaced_by_id: UUID | None = Field(default=None, foreign_key=f"{APP_SCHEMA}.refresh_tokens.id")
 
 
 class RevokedAccessToken(SQLModel, table=True):
@@ -86,9 +80,7 @@ class RevokedAccessToken(SQLModel, table=True):
     )
 
     jti: UUID = Field(primary_key=True)
-    user_principal_id: UUID = Field(
-        foreign_key=f"{APP_SCHEMA}.users.principal_id", index=True
-    )
+    user_principal_id: UUID = Field(foreign_key=f"{APP_SCHEMA}.users.principal_id", index=True)
     expires_at: datetime = utc_datetime_field()
     revoked_at: datetime = utc_datetime_field(default_factory=utc_now)
     reason: str = Field(max_length=100)
@@ -114,13 +106,9 @@ class AuthOneTimeToken(SQLModel, table=True):
     )
 
     id: UUID = Field(default_factory=new_uuid7, primary_key=True)
-    user_principal_id: UUID = Field(
-        foreign_key=f"{APP_SCHEMA}.users.principal_id", index=True
-    )
+    user_principal_id: UUID = Field(foreign_key=f"{APP_SCHEMA}.users.principal_id", index=True)
     purpose: str = Field(max_length=32)
-    token_hash: bytes = Field(
-        sa_column=Column(LargeBinary, nullable=False, unique=True)
-    )
+    token_hash: bytes = Field(sa_column=Column(LargeBinary, nullable=False, unique=True))
     expires_at: datetime = utc_datetime_field()
     consumed_at: datetime | None = utc_datetime_field(default=None)
     created_at: datetime = utc_datetime_field(default_factory=utc_now)

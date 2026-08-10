@@ -41,21 +41,15 @@ class Message(TimestampedModel, table=True):
             [f"{APP_SCHEMA}.agent_runs.id", f"{APP_SCHEMA}.agent_runs.tenant_id"],
             name="fk_messages_agent_run_tenant",
         ),
-        CheckConstraint(
-            "role IN ('user', 'assistant', 'system', 'tool')", name="ck_messages_role"
-        ),
+        CheckConstraint("role IN ('user', 'assistant', 'system', 'tool')", name="ck_messages_role"),
         CheckConstraint(
             "content_status IN ('complete', 'partial', 'failed', 'redacted')",
             name="ck_messages_content_status",
         ),
         CheckConstraint("sequence > 0", name="ck_messages_sequence"),
-        CheckConstraint(
-            "jsonb_typeof(content) = 'array'", name="ck_messages_content_array"
-        ),
+        CheckConstraint("jsonb_typeof(content) = 'array'", name="ck_messages_content_array"),
         UniqueConstraint("id", "tenant_id", name="uq_messages_id_tenant"),
-        UniqueConstraint(
-            "conversation_id", "sequence", name="uq_messages_conversation_sequence"
-        ),
+        UniqueConstraint("conversation_id", "sequence", name="uq_messages_conversation_sequence"),
         Index(
             "ix_messages_conversation_history",
             "conversation_id",
@@ -76,9 +70,7 @@ class Message(TimestampedModel, table=True):
     sequence: int = Field()
     role: str = Field(max_length=16)
     content: list[dict[str, Any]] = Field(sa_column=Column(JSONB, nullable=False))
-    rendered_text: str | None = Field(
-        default=None, sa_column=Column(Text, nullable=True)
-    )
+    rendered_text: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     content_status: str = Field(default="complete", max_length=16)
     agent_run_id: UUID | None = Field(default=None, index=True)
     model_alias: str | None = Field(default=None, max_length=200)

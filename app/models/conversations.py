@@ -33,9 +33,7 @@ class Conversation(TimestampedModel, table=True):
             "status IN ('active', 'archived', 'deleted')",
             name="ck_conversations_status",
         ),
-        CheckConstraint(
-            "latest_message_sequence >= 0", name="ck_conversations_latest_sequence"
-        ),
+        CheckConstraint("latest_message_sequence >= 0", name="ck_conversations_latest_sequence"),
         CheckConstraint("version > 0", name="ck_conversations_version"),
         UniqueConstraint("id", "tenant_id", name="uq_conversations_id_tenant"),
         Index(
@@ -70,9 +68,7 @@ class Conversation(TimestampedModel, table=True):
     status: str = Field(default="active", max_length=16)
     metadata_: dict[str, Any] = Field(
         default_factory=dict,
-        sa_column=Column(
-            "metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb")
-        ),
+        sa_column=Column("metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb")),
     )
     last_message_at: datetime | None = utc_datetime_field(default=None)
     latest_message_sequence: int = Field(default=0)

@@ -16,9 +16,7 @@ class Tenant(TimestampedModel, table=True):
     __tablename__ = "tenants"
     __table_args__ = (
         CheckConstraint("kind IN ('personal', 'team')", name="ck_tenants_kind"),
-        CheckConstraint(
-            "status IN ('active', 'suspended', 'deleted')", name="ck_tenants_status"
-        ),
+        CheckConstraint("status IN ('active', 'suspended', 'deleted')", name="ck_tenants_status"),
         Index(
             "ix_tenants_active_status",
             "status",
@@ -66,12 +64,8 @@ class TenantMembership(TimestampedModel, table=True):
 
     __tablename__ = "tenant_memberships"
     __table_args__ = (
-        CheckConstraint(
-            "role IN ('owner', 'admin', 'member')", name="ck_memberships_role"
-        ),
-        CheckConstraint(
-            "status IN ('active', 'invited', 'removed')", name="ck_memberships_status"
-        ),
+        CheckConstraint("role IN ('owner', 'admin', 'member')", name="ck_memberships_role"),
+        CheckConstraint("status IN ('active', 'invited', 'removed')", name="ck_memberships_status"),
         Index("ix_memberships_user_status", "user_principal_id", "status"),
         {"schema": APP_SCHEMA},
     )
