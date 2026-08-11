@@ -4,11 +4,13 @@ from collections.abc import Sequence
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, Query, Request, Response, status
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.core.logging import bind_context
 from app.dependencies.auth import get_current_user
 from app.dependencies.database import get_session
+from app.models.conversations import Conversation
 from app.models.messages import Message
 from app.models.users import User
 from app.schemas.conversations import (
@@ -58,15 +60,25 @@ def _message_crud(session: AsyncSession, conversation_id: UUID) -> MessageCRUD:
     return MessageCRUD(session, conversation_id)
 
 
+def _bind_conversation_context(request: Request, conversation: Conversation) -> None:
+    """Expose the public conversation identifier to logs for this request only."""
+
+    request.state.conversation_id = conversation.id
+    bind_context(conversation_id=str(conversation.id))
+
+
 @router.post("", response_model=ConversationRead, status_code=status.HTTP_201_CREATED)
 async def create_conversation(
     payload: ConversationCreate,
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> ConversationRead:
     """Explicitly create an empty, caller-owned conversation."""
 
-    return _conversation_read(await _crud(session, current_user).create(payload))
+    conversation = await _crud(session, current_user).create(payload)
+    _bind_conversation_context(request, conversation)
+    return _conversation_read(conversation)
 
 
 @router.get("", response_model=ConversationPage)
@@ -88,6 +100,7 @@ async def list_conversations(
 @router.get("/{conversation_id}", response_model=ConversationDetail)
 async def get_conversation(
     conversation_id: UUID,
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
     current_user: Annotated[User, Depends(get_current_user)],
     offset: int = Query(default=0, ge=0),
@@ -97,6 +110,7 @@ async def get_conversation(
 
     crud = _crud(session, current_user)
     conversation = await crud.require(conversation_id)
+    _bind_conversation_context(request, conversation)
     page = await _message_crud(session, conversation.id).get_page(offset=offset, limit=limit)
     conversation_data = _conversation_read(conversation).model_dump()
     conversation_data["metadata_"] = conversation_data.pop("metadata")
@@ -114,6 +128,7 @@ async def get_conversation(
 @router.get("/{conversation_id}/messages", response_model=MessagePage)
 async def list_messages(
     conversation_id: UUID,
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
     current_user: Annotated[User, Depends(get_current_user)],
     offset: int = Query(default=0, ge=0),
@@ -123,6 +138,7 @@ async def list_messages(
 
     crud = _crud(session, current_user)
     conversation = await crud.require(conversation_id)
+    _bind_conversation_context(request, conversation)
     page = await _message_crud(session, conversation.id).get_page(offset=offset, limit=limit)
     return _message_page(
         page.items,
@@ -135,11 +151,14 @@ async def list_messages(
 @router.delete("/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_conversation(
     conversation_id: UUID,
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> Response:
     """Immediately hide an owned conversation and schedule its physical purge."""
 
     crud = _crud(session, current_user)
-    await crud.delete(await crud.require(conversation_id))
+    conversation = await crud.require(conversation_id)
+    _bind_conversation_context(request, conversation)
+    await crud.delete(conversation)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
