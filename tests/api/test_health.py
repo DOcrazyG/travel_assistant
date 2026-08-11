@@ -30,6 +30,9 @@ def test_health_routes_are_included_in_openapi() -> None:
     assert "/api/v1/auth/refresh" in paths
     assert "/api/v1/auth/logout" in paths
     assert "/api/v1/auth/me" in paths
+    assert "/api/v1/conversations" in paths
+    assert "/api/v1/conversations/{conversation_id}" in paths
+    assert "/api/v1/conversations/{conversation_id}/messages" in paths
 
 
 def test_postgres_engine_uses_the_configured_settings() -> None:

@@ -2,14 +2,17 @@
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import cast
 from uuid import UUID
 
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.middleware.base import RequestResponseEndpoint
 from starlette.responses import Response
+from starlette.types import ExceptionHandler
 
 from app.api.v1.router import api_router
 from app.core.config import Settings, get_settings
@@ -19,7 +22,12 @@ from app.core.database import (
     create_session_factory,
     ensure_database_exists,
 )
-from app.core.errors import APIError, api_error_handler
+from app.core.errors import (
+    APIError,
+    api_error_handler,
+    http_error_handler,
+    validation_error_handler,
+)
 from app.core.rate_limit import create_rate_limiter
 from app.models.base import new_uuid7
 from app.services.auth import ensure_bootstrap_admin
@@ -63,6 +71,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     application.state.settings = active_settings
     application.add_exception_handler(APIError, api_error_handler)
+    application.add_exception_handler(
+        RequestValidationError,
+        cast(ExceptionHandler, validation_error_handler),
+    )
+    application.add_exception_handler(HTTPException, cast(ExceptionHandler, http_error_handler))
     if active_settings.parsed_cors_allowed_origins:
         application.add_middleware(
             CORSMiddleware,
