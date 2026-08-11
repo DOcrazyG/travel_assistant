@@ -26,6 +26,18 @@ class Settings(BaseSettings):
         default=None,
         description="Log renderer override; console locally and JSON in deployed environments.",
     )
+    conversation_write_rate_limit: int = Field(
+        default=30,
+        ge=1,
+        le=1_000,
+        description="Maximum conversation-management writes per user in one window.",
+    )
+    conversation_write_rate_limit_window_seconds: int = Field(
+        default=60,
+        ge=1,
+        le=3_600,
+        description="Window for conversation-management write rate limits.",
+    )
     host: str = Field(default="127.0.0.1", description="HTTP server bind address.")
     port: int = Field(default=8000, description="HTTP server bind port.")
     postgres_host: str = Field(default="127.0.0.1", description="PostgreSQL server host.")

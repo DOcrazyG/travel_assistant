@@ -12,7 +12,7 @@ from app.core.errors import APIError
 
 
 class RateLimiter(Protocol):
-    """The small interface required by authentication services."""
+    """The small interface shared by authentication and route-level limits."""
 
     async def check(self, key: str, *, limit: int, window_seconds: int) -> None: ...
 

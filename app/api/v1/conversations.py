@@ -10,6 +10,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.core.logging import bind_context
 from app.dependencies.auth import get_current_user
 from app.dependencies.database import get_session
+from app.dependencies.rate_limit import limit_conversation_write
 from app.models.conversations import Conversation
 from app.models.messages import Message
 from app.models.users import User
@@ -67,7 +68,12 @@ def _bind_conversation_context(request: Request, conversation: Conversation) -> 
     bind_context(conversation_id=str(conversation.id))
 
 
-@router.post("", response_model=ConversationRead, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=ConversationRead,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(limit_conversation_write)],
+)
 async def create_conversation(
     payload: ConversationCreate,
     request: Request,
@@ -148,7 +154,11 @@ async def list_messages(
     )
 
 
-@router.delete("/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{conversation_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(limit_conversation_write)],
+)
 async def delete_conversation(
     conversation_id: UUID,
     request: Request,

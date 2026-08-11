@@ -2,13 +2,14 @@
 
 from uuid import uuid4
 
+import httpx
 import pytest
-from fastapi.testclient import TestClient
 
 from app.api.v1 import conversations as conversations_api
 from app.core.crud import PageResult
 from app.dependencies.auth import get_current_user
 from app.dependencies.database import get_session
+from app.dependencies.rate_limit import limit_conversation_write
 from app.main import create_app
 from app.models.conversations import Conversation
 from app.models.messages import Message
@@ -64,7 +65,15 @@ def _user() -> User:
     )
 
 
-def test_conversation_routes_are_documented_and_never_expose_thread_id(
+@pytest.fixture
+def anyio_backend() -> str:
+    """Use asyncio because the project does not install Trio."""
+
+    return "asyncio"
+
+
+@pytest.mark.anyio
+async def test_conversation_routes_are_documented_and_never_expose_thread_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     user = _user()
@@ -77,6 +86,9 @@ def test_conversation_routes_are_documented_and_never_expose_thread_id(
     async def session_override() -> object:
         return object()
 
+    async def rate_limit_override() -> None:
+        return None
+
     monkeypatch.setattr(conversations_api, "ConversationCRUD", lambda *_: service)
     monkeypatch.setattr(
         conversations_api,
@@ -85,12 +97,14 @@ def test_conversation_routes_are_documented_and_never_expose_thread_id(
     )
     app.dependency_overrides[get_current_user] = current_user_override
     app.dependency_overrides[get_session] = session_override
-    client = TestClient(app)
-
-    created = client.post("/api/v1/conversations", json={"title": "广州周末"})
-    detail = client.get(f"/api/v1/conversations/{service.conversation.id}")
-    listed = client.get("/api/v1/conversations")
-    messages = client.get(f"/api/v1/conversations/{service.conversation.id}/messages")
+    app.dependency_overrides[limit_conversation_write] = rate_limit_override
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        created = await client.post("/api/v1/conversations", json={"title": "广州周末"})
+        detail = await client.get(f"/api/v1/conversations/{service.conversation.id}")
+        listed = await client.get("/api/v1/conversations")
+        messages = await client.get(f"/api/v1/conversations/{service.conversation.id}/messages")
+        deleted = await client.delete(f"/api/v1/conversations/{service.conversation.id}")
 
     assert created.status_code == 201
     assert created.json()["title"] == "广州周末"
@@ -99,13 +113,14 @@ def test_conversation_routes_are_documented_and_never_expose_thread_id(
     assert detail.json()["messages"]["data"][0]["rendered_text"] == "你好"
     assert listed.status_code == 200
     assert messages.status_code == 200
-    assert client.delete(f"/api/v1/conversations/{service.conversation.id}").status_code == 204
+    assert deleted.status_code == 204
     paths = app.openapi()["paths"]
     assert "/api/v1/conversations" in paths
     assert "/api/v1/conversations/{conversation_id}/messages" in paths
 
 
-def test_conversation_request_validation_uses_the_shared_safe_error_shape(
+@pytest.mark.anyio
+async def test_conversation_request_validation_uses_the_shared_safe_error_shape(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     app = create_app()
@@ -118,6 +133,9 @@ def test_conversation_request_validation_uses_the_shared_safe_error_shape(
     async def session_override() -> object:
         return object()
 
+    async def rate_limit_override() -> None:
+        return None
+
     monkeypatch.setattr(conversations_api, "ConversationCRUD", lambda *_: service)
     monkeypatch.setattr(
         conversations_api,
@@ -126,9 +144,10 @@ def test_conversation_request_validation_uses_the_shared_safe_error_shape(
     )
     app.dependency_overrides[get_current_user] = current_user_override
     app.dependency_overrides[get_session] = session_override
-    client = TestClient(app)
-
-    response = client.post("/api/v1/conversations", json={"title": "   "})
+    app.dependency_overrides[limit_conversation_write] = rate_limit_override
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.post("/api/v1/conversations", json={"title": "   "})
 
     assert response.status_code == 422
     assert response.json()["code"] == "validation_error"
