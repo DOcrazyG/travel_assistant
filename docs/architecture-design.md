@@ -119,8 +119,8 @@ Exact versions are locked in `pyproject.toml` and `uv.lock`. New Agent code uses
 │   │       └── tools/                # Weather, attraction, route tools
 │   ├── models/                       # ORM models
 │   ├── schemas/                      # Pydantic API DTOs
-│   ├── repositories/                 # Data-access boundary
 │   ├── services/
+│   │   ├── crud/                     # Table-scoped persistence operations
 │   │   ├── llm/                      # Model registry, retry, circuit breaker/fallback
 │   │   ├── conversation.py
 │   │   ├── memory.py

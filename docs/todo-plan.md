@@ -42,10 +42,10 @@ flowchart LR
 
 **Goal:** Provide stable conversation APIs and persistence boundaries before complex Agent behavior.
 
-- [ ] Design Pydantic request and response schemas plus a unified error format.
-- [ ] Build `api/v1` routes for health checks, conversation creation and retrieval, message retrieval, and message submission.
+- [x] Design Pydantic request and response schemas plus a unified error format.
+- [ ] Build `api/v1` routes for health checks, conversation creation and retrieval, message retrieval, and message submission. Conversation creation and history retrieval are complete; message submission remains part of the P2 Agent execution flow.
 - [x] Add PostgreSQL, SQLModel/SQLAlchemy, and Alembic migrations for application-owned identity, conversation, message, run, tool-call, attachment, audit, and future-extension tables. The full schema is defined up front; product capabilities activate incrementally.
-- [ ] Implement repository and service layers; route handlers must not construct SQL or call models directly.
+- [x] Implement scoped CRUD service layers; route handlers must not construct SQL or call models directly. Conversation persistence remains in `app/services/crud/conversations.py`, without a duplicate repository layer.
 - [x] Choose the first identity model: multiple local email/password accounts with JWT; anonymous guest conversations and machine integrations are not supported. Create a public `conversation_id` mapped one-to-one to a stable internal `thread_id` for every conversation.
 - [ ] Add request IDs, middleware logging context, a CORS allowlist, and base exception handling.
 - [ ] Add Redis or Valkey for idempotency keys and minimum rate limiting. An explicit in-memory fallback is allowed only in development.
