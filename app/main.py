@@ -3,15 +3,12 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import cast
-from uuid import UUID
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.exc import SQLAlchemyError
-from starlette.middleware.base import RequestResponseEndpoint
-from starlette.responses import Response
 from starlette.types import ExceptionHandler
 
 from app.api.v1.router import api_router
@@ -26,10 +23,12 @@ from app.core.errors import (
     APIError,
     api_error_handler,
     http_error_handler,
+    unexpected_error_handler,
     validation_error_handler,
 )
+from app.core.logging import configure_logging
+from app.core.middleware import LoggingContextMiddleware, RequestContextMiddleware
 from app.core.rate_limit import create_rate_limiter
-from app.models.base import new_uuid7
 from app.services.auth import ensure_bootstrap_admin
 
 
@@ -63,6 +62,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     """Create the HTTP application without importing Agent runtime dependencies."""
 
     active_settings = settings or get_settings()
+    configure_logging(active_settings)
     application = FastAPI(
         title="Travel Assistant API",
         version="0.1.0",
@@ -76,6 +76,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         cast(ExceptionHandler, validation_error_handler),
     )
     application.add_exception_handler(HTTPException, cast(ExceptionHandler, http_error_handler))
+    application.add_exception_handler(Exception, cast(ExceptionHandler, unexpected_error_handler))
     if active_settings.parsed_cors_allowed_origins:
         application.add_middleware(
             CORSMiddleware,
@@ -85,15 +86,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             allow_headers=["Authorization", "Content-Type"],
         )
 
-    @application.middleware("http")
-    async def add_request_id(request: Request, call_next: RequestResponseEndpoint) -> Response:
-        """Attach a request ID used by errors, audits, and response correlation."""
-
-        request_id: UUID = new_uuid7()
-        request.state.request_id = request_id
-        response = await call_next(request)
-        response.headers["X-Request-ID"] = str(request_id)
-        return response
+    application.add_middleware(LoggingContextMiddleware)
+    application.add_middleware(RequestContextMiddleware)
 
     application.include_router(api_router)
     return application

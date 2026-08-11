@@ -6,6 +6,10 @@ from fastapi import HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
+
 
 class APIError(Exception):
     """An expected error with a client-safe status, code, and message."""
@@ -89,4 +93,18 @@ async def http_error_handler(request: Request, error: HTTPException) -> JSONResp
         status_code=error.status_code,
         content=_error_body(request, code="http_error", message=message),
         headers=error.headers,
+    )
+
+
+async def unexpected_error_handler(request: Request, error: Exception) -> JSONResponse:
+    """Return a correlation-safe response for unexpected application failures."""
+
+    logger.exception("unhandled_request_exception", exception_type=type(error).__name__)
+    return JSONResponse(
+        status_code=500,
+        content=_error_body(
+            request,
+            code="internal_error",
+            message="An unexpected error occurred.",
+        ),
     )

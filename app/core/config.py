@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     )
     app_debug: bool = Field(default=False, description="Enable FastAPI debug mode.")
     log_level: str = Field(default="INFO", description="Application log level.")
+    log_format: Literal["console", "json"] | None = Field(
+        default=None,
+        description="Log renderer override; console locally and JSON in deployed environments.",
+    )
     host: str = Field(default="127.0.0.1", description="HTTP server bind address.")
     port: int = Field(default=8000, description="HTTP server bind port.")
     postgres_host: str = Field(default="127.0.0.1", description="PostgreSQL server host.")
@@ -95,6 +99,14 @@ class Settings(BaseSettings):
         if self.allow_in_memory_rate_limit is not None:
             return self.allow_in_memory_rate_limit
         return self.environment in {"development", "test"}
+
+    @property
+    def effective_log_format(self) -> Literal["console", "json"]:
+        """Use readable local logs and machine-readable logs outside local environments."""
+
+        if self.log_format is not None:
+            return self.log_format
+        return "console" if self.environment in {"development", "test"} else "json"
 
     @model_validator(mode="after")
     def validate_production_security_settings(self) -> "Settings":
