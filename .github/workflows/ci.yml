@@ -11,6 +11,33 @@ permissions:
 jobs:
   quality:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: travel_assistant
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d travel_assistant"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      RUN_POSTGRES_INTEGRATION: "1"
+      ENVIRONMENT: test
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: "5432"
+      POSTGRES_DATABASE: travel_assistant
+      POSTGRES_ADMIN_DATABASE: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      REDIS_URL: ""
+      ALLOW_IN_MEMORY_RATE_LIMIT: "true"
+      BOOTSTRAP_ADMIN_EMAIL: bootstrap@example.test
+      BOOTSTRAP_ADMIN_PASSWORD: CorrectHorseBatteryStaple!42
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

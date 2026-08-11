@@ -47,9 +47,9 @@ flowchart LR
 - [x] Add PostgreSQL, SQLModel/SQLAlchemy, and Alembic migrations for application-owned identity, conversation, message, run, tool-call, attachment, audit, and future-extension tables. The full schema is defined up front; product capabilities activate incrementally.
 - [x] Implement scoped CRUD service layers; route handlers must not construct SQL or call models directly. Conversation persistence remains in `app/services/crud/conversations.py`, without a duplicate repository layer.
 - [x] Choose the first identity model: multiple local email/password accounts with JWT; anonymous guest conversations and machine integrations are not supported. Create a public `conversation_id` mapped one-to-one to a stable internal `thread_id` for every conversation.
-- [ ] Add request IDs, middleware logging context, a CORS allowlist, and base exception handling.
+- [x] Add request IDs, middleware logging context, a CORS allowlist, and base exception handling.
 - [x] Add Valkey-backed minimum rate limiting and durable, user-scoped idempotency records. An explicit in-memory rate-limit fallback is allowed only in development.
-- [ ] Add API integration tests for unauthenticated requests, authorization failures, conversation isolation, pagination, and error format.
+- [x] Add API integration tests for unauthenticated requests, authorization failures, conversation isolation, pagination, persistence across restart, and error format.
 
 **Acceptance criteria:** Conversations and messages survive an API restart; user A cannot read user B's conversation; all APIs appear in `/docs`.
 

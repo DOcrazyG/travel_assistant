@@ -20,6 +20,9 @@ if config.config_file_name is not None:
 def database_url() -> str:
     """Build the migration URL from the same typed settings as the application."""
 
+    configured_url = config.attributes.get("database_url")
+    if configured_url is not None:
+        return str(configured_url).replace("%", "%%")
     return create_database_url(Settings()).render_as_string(hide_password=False).replace("%", "%%")
 
 

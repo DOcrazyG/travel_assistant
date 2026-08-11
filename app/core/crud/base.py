@@ -110,7 +110,7 @@ class SQLModelCRUD[ModelT: SQLModel, CreateSchemaT: BaseModel, UpdateSchemaT: Ba
 
         self._validate_pagination(offset=offset, limit=limit)
         result = await self.session.exec(statement.offset(offset).limit(limit + 1))
-        items = cast(list[ItemT], result.all())
+        items = cast(list[ItemT], result.scalars().all())
         has_more = len(items) > limit
         return PageResult(items=items[:limit], next_offset=offset + limit if has_more else None)
 
@@ -129,7 +129,7 @@ class SQLModelCRUD[ModelT: SQLModel, CreateSchemaT: BaseModel, UpdateSchemaT: Ba
 
         id_column = getattr(self.model, self.id_field)
         result = await self.session.exec(self._active_statement().where(id_column == entity_id))
-        return result.one_or_none()
+        return result.scalar_one_or_none()
 
     async def get_multi(self, *, offset: int = 0, limit: int = 100) -> Sequence[ModelT]:
         """List active scoped models using bounded offset pagination."""

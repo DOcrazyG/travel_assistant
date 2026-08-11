@@ -29,6 +29,12 @@ class FakeResult:
     def one_or_none(self) -> Conversation | None:
         return self.entity
 
+    def scalar_one_or_none(self) -> Conversation | None:
+        return self.entity
+
+    def scalars(self) -> "FakeResult":
+        return self
+
     def all(self) -> list[Conversation]:
         return [self.entity] if self.entity else []
 

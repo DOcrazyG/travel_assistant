@@ -65,6 +65,9 @@ make revision message=... # Generate a candidate migration from SQLModel metadat
 make pre-commit-install  # Install local Git hooks
 ```
 
+The PostgreSQL integration suite is skipped unless explicitly enabled. With local Compose
+PostgreSQL running, use `RUN_POSTGRES_INTEGRATION=1 uv run pytest tests/integration`.
+
 ## Current scope
 
 The original command-line Agent and travel-tool implementation have been removed. New functionality will be implemented directly under `app/` according to the architecture design, without migrating the previous prototype.

@@ -11,6 +11,9 @@ from app.services.crud.messages import MessageCRUD
 
 
 class FakeResult:
+    def scalars(self) -> "FakeResult":
+        return self
+
     def all(self) -> list[Message]:
         return []
 
