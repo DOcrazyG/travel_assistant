@@ -50,6 +50,21 @@ def test_conversation_history_and_run_indexes_are_declared() -> None:
     assert "uq_agent_runs_active_conversation" in {index.name for index in agent_runs.indexes}
 
 
+def test_idempotency_keys_are_scoped_to_one_user() -> None:
+    idempotency_keys = SQLModel.metadata.tables[f"{APP_SCHEMA}.idempotency_keys"]
+
+    assert "user_id" in idempotency_keys.columns
+    request_index = next(
+        index for index in idempotency_keys.indexes if index.name == "uq_idempotency_keys_request"
+    )
+    assert tuple(request_index.columns.keys()) == (
+        "user_id",
+        "http_method",
+        "route",
+        "idempotency_key",
+    )
+
+
 def test_user_models_have_no_tenant_or_principal_columns() -> None:
     forbidden_columns = {"tenant_id", "principal_id", "owner_principal_id", "user_principal_id"}
 

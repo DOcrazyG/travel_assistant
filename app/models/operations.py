@@ -23,12 +23,14 @@ class IdempotencyKey(SQLModel, table=True):
         ),
         Index(
             "uq_idempotency_keys_request",
+            "user_id",
             "http_method",
             "route",
             "idempotency_key",
             unique=True,
         ),
         Index("ix_idempotency_keys_expiry", "expires_at"),
+        Index("ix_idempotency_keys_user_expiry", "user_id", "expires_at"),
         Index(
             "ix_idempotency_keys_conversation",
             "conversation_id",
@@ -38,6 +40,7 @@ class IdempotencyKey(SQLModel, table=True):
     )
 
     id: UUID = Field(default_factory=new_uuid7, primary_key=True)
+    user_id: UUID = Field(foreign_key=f"{APP_SCHEMA}.users.id", nullable=False)
     http_method: str = Field(max_length=10)
     route: str = Field(max_length=255)
     idempotency_key: str = Field(max_length=255)

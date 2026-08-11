@@ -4,6 +4,11 @@
 
 This project uses Alembic to version application-owned PostgreSQL tables. The current baseline revision is `373c9d3f1e26` (`create application schema`). It creates the `app` schema, its current 21 tables, indexes, constraints, JSONB defaults, and UTC `timestamptz` columns.
 
+Revision `6a1e7f19c482` scopes idempotency keys directly to authenticated users. It clears only
+the unused pre-release idempotency records before adding the non-null ownership column and the
+new uniqueness key. Its downgrade intentionally fails: after different users reuse the same
+opaque key, restoring global uniqueness would lose a valid account's record.
+
 ## Scope and ownership
 
 | Boundary | Versioned by | Notes |

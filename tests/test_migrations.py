@@ -32,3 +32,11 @@ def test_bootstrap_admin_migration_adds_an_explicit_unique_admin_marker() -> Non
 
     assert "ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT false" in migration_source
     assert "CREATE UNIQUE INDEX uq_users_single_admin" in migration_source
+
+
+def test_idempotency_migration_adds_a_direct_user_scope() -> None:
+    script = ScriptDirectory.from_config(Config("alembic.ini"))
+    migration_source = Path(script.get_revision("6a1e7f19c482").path).read_text(encoding="utf-8")
+
+    assert "ADD COLUMN user_id UUID NOT NULL REFERENCES app.users(id)" in migration_source
+    assert "(user_id, http_method, route, idempotency_key)" in migration_source

@@ -50,7 +50,7 @@ All IDs are application-generated UUIDv7 values. All timestamps are UTC `timesta
 
 `tool_calls` is a redacted child audit record with `id`, `agent_run_id`, positive per-run sequence, tool/provider IDs, status, redacted input/output summaries, source URLs, timing, duration, and safe error fields. `(agent_run_id, sequence)` is unique; worker and tool-history indexes support its query paths.
 
-`idempotency_keys` makes a retry of a mutation safe. It stores method, route, opaque key, body fingerprint, optional produced conversation/run IDs, status, response snapshot, and expiry. Before multi-user message submissions are enabled, its unique scope must be migrated to include a direct `user_id`; the present key is a single-account baseline artifact.
+`idempotency_keys` makes a retry of a mutation safe. It stores direct `user_id`, method, route, opaque key, body fingerprint, optional produced conversation/run IDs, status, response snapshot, and expiry. Its unique scope is `(user_id, http_method, route, idempotency_key)`, so one account cannot block or replay another account's request.
 
 ### Attachments and preferences
 
