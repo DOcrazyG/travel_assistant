@@ -2,10 +2,14 @@
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from uuid import UUID
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.exc import SQLAlchemyError
+from starlette.middleware.base import RequestResponseEndpoint
+from starlette.responses import Response
 
 from app.api.v1.router import api_router
 from app.core.config import Settings, get_settings
@@ -15,6 +19,10 @@ from app.core.database import (
     create_session_factory,
     ensure_database_exists,
 )
+from app.core.errors import APIError, api_error_handler
+from app.core.rate_limit import create_rate_limiter
+from app.models.base import new_uuid7
+from app.services.auth import ensure_bootstrap_admin
 
 
 @asynccontextmanager
@@ -32,9 +40,14 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
 
     application.state.database_engine = engine
     application.state.session_factory = create_session_factory(engine)
+    rate_limiter = await create_rate_limiter(settings)
+    application.state.rate_limiter = rate_limiter
     try:
+        async with application.state.session_factory() as session:
+            await ensure_bootstrap_admin(session, settings)
         yield
     finally:
+        await rate_limiter.close()
         await engine.dispose()
 
 
@@ -49,6 +62,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     application.state.settings = active_settings
+    application.add_exception_handler(APIError, api_error_handler)
+    if active_settings.parsed_cors_allowed_origins:
+        application.add_middleware(
+            CORSMiddleware,
+            allow_origins=list(active_settings.parsed_cors_allowed_origins),
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "OPTIONS"],
+            allow_headers=["Authorization", "Content-Type"],
+        )
+
+    @application.middleware("http")
+    async def add_request_id(request: Request, call_next: RequestResponseEndpoint) -> Response:
+        """Attach a request ID used by errors, audits, and response correlation."""
+
+        request_id: UUID = new_uuid7()
+        request.state.request_id = request_id
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = str(request_id)
+        return response
+
     application.include_router(api_router)
     return application
 

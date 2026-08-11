@@ -25,6 +25,11 @@ def test_health_routes_are_included_in_openapi() -> None:
 
     assert "/health/live" in paths
     assert "/health/ready" in paths
+    assert "/api/v1/auth/register" in paths
+    assert "/api/v1/auth/login" in paths
+    assert "/api/v1/auth/refresh" in paths
+    assert "/api/v1/auth/logout" in paths
+    assert "/api/v1/auth/me" in paths
 
 
 def test_postgres_engine_uses_the_configured_settings() -> None:
@@ -119,6 +124,7 @@ def test_lifespan_verifies_and_disposes_the_database_engine(
     engine = FakeEngine()
     connection_checked = False
     database_created = False
+    administrator_checked = False
 
     def create_engine(_: Settings) -> FakeEngine:
         return engine
@@ -131,10 +137,22 @@ def test_lifespan_verifies_and_disposes_the_database_engine(
         nonlocal database_created
         database_created = True
 
+    class FakeSessionContext:
+        async def __aenter__(self) -> object:
+            return object()
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+    async def ensure_administrator(_: object, __: Settings) -> None:
+        nonlocal administrator_checked
+        administrator_checked = True
+
     monkeypatch.setattr(main_module, "create_database_engine", create_engine)
     monkeypatch.setattr(main_module, "check_database_connection", check_connection)
-    monkeypatch.setattr(main_module, "create_session_factory", lambda _: object())
+    monkeypatch.setattr(main_module, "create_session_factory", lambda _: FakeSessionContext)
     monkeypatch.setattr(main_module, "ensure_database_exists", ensure_database)
+    monkeypatch.setattr(main_module, "ensure_bootstrap_admin", ensure_administrator)
     application = create_app(Settings(environment="test"))
 
     async def manage_lifespan() -> None:
@@ -143,6 +161,7 @@ def test_lifespan_verifies_and_disposes_the_database_engine(
             assert application.state.session_factory is not None
             assert database_created
             assert connection_checked
+            assert administrator_checked
             assert not engine.disposed
 
     asyncio.run(manage_lifespan())

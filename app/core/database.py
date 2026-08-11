@@ -1,8 +1,5 @@
 """Async PostgreSQL engine, session, and connectivity helpers."""
 
-from collections.abc import AsyncGenerator
-
-from fastapi import Request
 from sqlalchemy import URL, text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 from sqlmodel import create_engine
@@ -63,18 +60,6 @@ def create_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSessi
     """Create request-scoped SQLModel async sessions for an application engine."""
 
     return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-
-async def get_session(request: Request) -> AsyncGenerator[AsyncSession, None]:
-    """Yield one uncommitted async session for the current request.
-
-    Services own transaction boundaries with ``async with session.begin()`` so a
-    CRUD call stays composable with all other writes in the request.
-    """
-
-    session_factory: async_sessionmaker[AsyncSession] = request.app.state.session_factory
-    async with session_factory() as session:
-        yield session
 
 
 async def check_database_connection(engine: AsyncEngine) -> None:
