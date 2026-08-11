@@ -1,5 +1,5 @@
 """Shared CRUD primitives for SQLModel-backed services."""
 
-from app.core.crud.base import SQLModelCRUD
+from app.core.crud.base import PageResult, SQLModelCRUD
 
-__all__ = ["SQLModelCRUD"]
+__all__ = ["PageResult", "SQLModelCRUD"]

@@ -1,7 +1,8 @@
 """Small, async CRUD helpers for SQLModel tables."""
 
 from collections.abc import Mapping, Sequence
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, cast
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -10,6 +11,14 @@ from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.base import utc_now
+
+
+@dataclass(frozen=True)
+class PageResult[ItemT]:
+    """One bounded offset page and the exact continuation offset, if any."""
+
+    items: Sequence[ItemT]
+    next_offset: int | None
 
 
 class SQLModelCRUD[ModelT: SQLModel, CreateSchemaT: BaseModel, UpdateSchemaT: BaseModel]:
@@ -80,6 +89,31 @@ class SQLModelCRUD[ModelT: SQLModel, CreateSchemaT: BaseModel, UpdateSchemaT: Ba
             raise ValueError(f"Unknown {self.model.__name__} fields: {fields}")
         return values
 
+    @staticmethod
+    def _validate_pagination(*, offset: int, limit: int) -> None:
+        """Apply the common offset-page bounds used by every CRUD service."""
+
+        if offset < 0:
+            raise ValueError("offset must be non-negative")
+        if not 1 <= limit <= 100:
+            raise ValueError("limit must be between 1 and 100")
+
+    async def _get_page[ItemT](
+        self,
+        statement: Any,
+        *,
+        offset: int,
+        limit: int,
+        item_type: type[ItemT],
+    ) -> PageResult[ItemT]:
+        """Fetch one sentinel row and derive an accurate next offset without a count query."""
+
+        self._validate_pagination(offset=offset, limit=limit)
+        result = await self.session.exec(statement.offset(offset).limit(limit + 1))
+        items = cast(list[ItemT], result.all())
+        has_more = len(items) > limit
+        return PageResult(items=items[:limit], next_offset=offset + limit if has_more else None)
+
     def _assert_mutable_entity(self, entity: ModelT) -> None:
         for field, value in self.scope.items():
             if getattr(entity, field) != value:
@@ -100,12 +134,17 @@ class SQLModelCRUD[ModelT: SQLModel, CreateSchemaT: BaseModel, UpdateSchemaT: Ba
     async def get_multi(self, *, offset: int = 0, limit: int = 100) -> Sequence[ModelT]:
         """List active scoped models using bounded offset pagination."""
 
-        if offset < 0:
-            raise ValueError("offset must be non-negative")
-        if not 1 <= limit <= 100:
-            raise ValueError("limit must be between 1 and 100")
-        result = await self.session.exec(self._active_statement().offset(offset).limit(limit))
-        return result.all()
+        return (await self.get_page(offset=offset, limit=limit)).items
+
+    async def get_page(self, *, offset: int = 0, limit: int = 100) -> PageResult[ModelT]:
+        """List active scoped models with a precise continuation offset."""
+
+        return await self._get_page(
+            self._active_statement(),
+            offset=offset,
+            limit=limit,
+            item_type=self.model,
+        )
 
     async def create(self, data: CreateSchemaT | Mapping[str, Any]) -> ModelT:
         """Add and flush a scoped model without committing the transaction."""

@@ -81,6 +81,24 @@ def test_get_always_scopes_to_user_and_hides_soft_deleted_records() -> None:
     assert user_id in compiled.params.values()
 
 
+def test_get_page_uses_a_sentinel_row_for_an_accurate_next_offset() -> None:
+    user_id = uuid4()
+    first = Conversation(user_id=user_id)
+    second = Conversation(user_id=user_id)
+    third = Conversation(user_id=user_id)
+    session = FakeSession()
+    session.result = FakeResult()
+    session.result.all = lambda: [first, second, third]  # type: ignore[method-assign]
+    crud = crud_for(session, user_id)
+
+    page = asyncio.run(crud.get_page(offset=4, limit=2))
+
+    assert page.items == [first, second]
+    assert page.next_offset == 6
+    compiled = session.statements[0].compile(dialect=postgresql.dialect())
+    assert 3 in compiled.params.values()
+
+
 def test_create_sets_scope_and_only_flushes() -> None:
     user_id = uuid4()
     session = FakeSession()
