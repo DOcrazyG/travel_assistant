@@ -4,14 +4,14 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, Column, Index, Text, text
+from sqlalchemy import Boolean, CheckConstraint, Column, Index, Text, text
 from sqlmodel import Field
 
 from app.models.base import APP_SCHEMA, TimestampedModel, new_uuid7, utc_datetime_field
 
 
 class User(TimestampedModel, table=True):
-    """The sole local account allowed to access this single-user application."""
+    """A local password account authenticated by its normalized email address."""
 
     __tablename__ = "users"
     __table_args__ = (
@@ -39,10 +39,10 @@ class User(TimestampedModel, table=True):
             postgresql_where=text("deleted_at IS NULL"),
         ),
         Index(
-            "uq_users_single_active_account",
+            "uq_users_single_admin",
             text("(true)"),
             unique=True,
-            postgresql_where=text("deleted_at IS NULL"),
+            postgresql_where=text("is_admin IS TRUE AND deleted_at IS NULL"),
         ),
         {"schema": APP_SCHEMA},
     )
@@ -51,7 +51,11 @@ class User(TimestampedModel, table=True):
     email: str = Field(max_length=320)
     email_normalized: str = Field(max_length=320)
     password_hash: str = Field(sa_column=Column(Text, nullable=False))
-    status: str = Field(default="pending_verification", max_length=32)
+    status: str = Field(default="active", max_length=32)
+    is_admin: bool = Field(
+        default=False,
+        sa_column=Column(Boolean, nullable=False, server_default=text("false")),
+    )
     email_verified_at: datetime | None = utc_datetime_field(default=None)
     password_changed_at: datetime | None = utc_datetime_field(default=None)
     security_invalid_before: datetime | None = utc_datetime_field(default=None)

@@ -48,6 +48,7 @@ def test_user_read_omits_password_and_accepts_orm_attributes() -> None:
             "id": uuid4(),
             "email": "traveler@example.com",
             "status": "active",
+            "is_admin": False,
             "email_verified_at": None,
             "last_login_at": None,
             "created_at": now,
@@ -57,3 +58,4 @@ def test_user_read_omits_password_and_accepts_orm_attributes() -> None:
     )
 
     assert "password" not in user.model_dump()
+    assert user.is_admin is False

@@ -50,7 +50,7 @@ def test_conversation_history_and_run_indexes_are_declared() -> None:
     assert "uq_agent_runs_active_conversation" in {index.name for index in agent_runs.indexes}
 
 
-def test_single_user_models_have_no_tenant_or_principal_columns() -> None:
+def test_user_models_have_no_tenant_or_principal_columns() -> None:
     forbidden_columns = {"tenant_id", "principal_id", "owner_principal_id", "user_principal_id"}
 
     application_tables = [
@@ -60,7 +60,8 @@ def test_single_user_models_have_no_tenant_or_principal_columns() -> None:
     assert all(forbidden_columns.isdisjoint(table.columns.keys()) for table in application_tables)
 
     users = SQLModel.metadata.tables[f"{APP_SCHEMA}.users"]
-    assert "uq_users_single_active_account" in {index.name for index in users.indexes}
+    assert "uq_users_single_active_account" not in {index.name for index in users.indexes}
+    assert "uq_users_single_admin" in {index.name for index in users.indexes}
 
 
 def test_uuid7_defaults_are_uuid_version_seven() -> None:

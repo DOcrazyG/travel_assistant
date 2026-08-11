@@ -28,7 +28,7 @@ revision:
 	uv run alembic revision --autogenerate -m "$(message)"
 
 up:
-	docker compose up -d postgres
+	docker compose up -d postgres valkey
 
 down:
 	docker compose down

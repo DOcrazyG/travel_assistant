@@ -98,6 +98,7 @@ class UserRead(BaseModel):
     id: UUID
     email: str
     status: str
+    is_admin: bool
     email_verified_at: datetime | None
     last_login_at: datetime | None
     created_at: datetime

@@ -21,6 +21,9 @@ dependencies = [
     "psycopg[binary,pool]>=3.2,<4",
     "sqlmodel>=0.0.24,<1",
     "uvicorn[standard]>=0.30,<1",
+    "pwdlib[argon2]>=0.3,<1",
+    "pyjwt>=2.10,<3",
+    "redis>=5.2,<7",
 ]
 
 [project.scripts]
