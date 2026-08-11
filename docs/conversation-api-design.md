@@ -42,7 +42,7 @@ The initial product owns registration, login, email verification, password reset
 
 ### Machine access
 
-Programmatic API-key integrations are out of scope for this single-user release. The only supported credential is a local-user JWT plus its rotating refresh token.
+Programmatic API-key integrations are out of scope for this release. The only supported credential is a local-user JWT plus its rotating refresh token.
 
 ### Authorization rule
 

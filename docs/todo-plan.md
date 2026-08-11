@@ -1,6 +1,6 @@
 # Travel Assistant Backend Iteration Plan
 
-**Status:** P0 complete; P1 database schema and migration foundation complete
+**Status:** P0 complete; P1 database and authentication foundation in progress
 **Related design:** [Travel Assistant Backend Architecture Design](architecture-design.md)  
 **Planning approach:** Deliver milestones with explicit acceptance criteria. Expand scope only after the preceding milestone is complete.
 
@@ -46,7 +46,7 @@ flowchart LR
 - [ ] Build `api/v1` routes for health checks, conversation creation and retrieval, message retrieval, and message submission.
 - [x] Add PostgreSQL, SQLModel/SQLAlchemy, and Alembic migrations for application-owned identity, conversation, message, run, tool-call, attachment, audit, and future-extension tables. The full schema is defined up front; product capabilities activate incrementally.
 - [ ] Implement repository and service layers; route handlers must not construct SQL or call models directly.
-- [x] Choose the first identity model: one local authenticated user with JWT; anonymous guest conversations and machine integrations are not supported. Create a public `conversation_id` mapped one-to-one to a stable internal `thread_id` for every conversation.
+- [x] Choose the first identity model: multiple local email/password accounts with JWT; anonymous guest conversations and machine integrations are not supported. Create a public `conversation_id` mapped one-to-one to a stable internal `thread_id` for every conversation.
 - [ ] Add request IDs, middleware logging context, a CORS allowlist, and base exception handling.
 - [ ] Add Redis or Valkey for idempotency keys and minimum rate limiting. An explicit in-memory fallback is allowed only in development.
 - [ ] Add API integration tests for unauthenticated requests, authorization failures, conversation isolation, pagination, and error format.
@@ -73,7 +73,7 @@ flowchart LR
 
 **Goal:** Make the service diagnosable, protected, and measurable.
 
-- [ ] Complete self-managed account registration/login, Argon2id password hashing, JWT validation, refresh-session rotation, revocation and expiration, and security-event logging.
+- [ ] Complete deferred account capabilities: email verification, password reset, account lifecycle operations, and security-event review. Registration/login, Argon2id password hashing, JWT validation, refresh-session rotation, revocation, expiration, and security-event logging start in P1.
 - [ ] Define rate limits by user and IP, concurrent-stream limits, and LLM/tool duration and cost budgets.
 - [ ] Define four failure strategies: retry transient errors, return model-recoverable errors to the graph, clarify user-fixable errors, and alert on unexpected errors.
 - [ ] Add structured logs and redaction rules for `request_id`, `conversation_id`, `thread_id`, `run_id`, and trace IDs.
@@ -115,10 +115,10 @@ flowchart LR
 
 ## Decisions to confirm before P1
 
-- [x] First identity model: one local authenticated user with JWT; no anonymous conversations or API-key credentials.
+- [x] First identity model: multiple local email/password accounts with JWT; no anonymous conversations or API-key credentials.
 - [x] API compatibility target: OpenAI Chat Completions-inspired request/response and streaming semantics, not zero-change OpenAI SDK compatibility.
 - [x] Conversation creation: the first chat request creates a conversation automatically; later requests send the returned `conversation_id`.
-- [x] Self-managed accounts: included in the first release, with Argon2id password hashes, email verification, password reset, JWT access tokens, and rotating refresh tokens.
+- [x] Self-managed accounts: open registration with Argon2id password hashes, email login, JWT access tokens, and rotating refresh tokens. Email verification and password reset are deferred to P3.
 - [x] Token lifecycle: short-lived access JWTs, rotating refresh sessions, and server-side revocation state.
 - [x] Concurrent writes: one active run per conversation plus idempotency keys for submissions.
 - [ ] First LLM provider and fallback model. Must arbitrary OpenAI-compatible endpoints remain supported?

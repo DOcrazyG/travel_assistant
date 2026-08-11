@@ -6,7 +6,7 @@
 
 ## 1. Context and goals
 
-The repository now contains only an engineering baseline. The target system is a locally authenticated single-user travel-assistant backend with HTTP APIs, conversation state, controlled external tools, operational safeguards, and observability.
+The repository now contains an engineering and authentication baseline. The target system is a locally authenticated multi-account travel-assistant backend with HTTP APIs, conversation state, controlled external tools, operational safeguards, and observability.
 
 This design takes inspiration from [fastapi-langgraph-agent-production-ready-template](https://github.com/wassim249/fastapi-langgraph-agent-production-ready-template): an API layer, LangGraph orchestration, independent services, database migrations, caching, authentication, rate limiting, observability, and evaluation. The first product scope is travel advice and itinerary drafts. Booking, payments, and other irreversible travel decisions are explicitly excluded.
 

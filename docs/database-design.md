@@ -1,18 +1,17 @@
 # Travel Assistant Database Design
 
-**Status:** Single-user SQLModel definitions and rebuildable initial Alembic baseline
+**Status:** Multi-account SQLModel definitions and rebuildable initial Alembic baseline
 **Last updated:** 2026-08-11
 **Database:** PostgreSQL 16; MinIO stores attachment bytes; LangGraph owns its checkpoint tables
 
 ## Scope
 
-This is a locally authenticated, single-user question-answering application. It has one active local account, rather than organizations, workspaces, roles, service principals, API keys, or cross-user sharing. `app` is owned by the application; LangGraph checkpoint tables remain dependency-owned in a separate `langgraph` schema.
+This is a locally authenticated, multi-account question-answering application. It has local accounts but no organizations, workspaces, roles, service principals, API keys, or cross-user sharing. `app` is owned by the application; LangGraph checkpoint tables remain dependency-owned in a separate `langgraph` schema.
 
 All IDs are application-generated UUIDv7 values. All timestamps are UTC `timestamptz`. Foreign keys use PostgreSQL's default `RESTRICT` behavior, so a purge worker must intentionally remove dependent rows in a safe order.
 
 ## Core invariants
 
-- `users` permits at most one non-deleted row. A partial unique index on the constant `true` enforces this in PostgreSQL, rather than relying only on a bootstrap route.
 - Every user-owned resource has a direct `user_id → users.id` foreign key; there are no tenant IDs, principals, memberships, or composite tenant keys.
 - A conversation has a public `id` and an immutable, globally unique LangGraph `thread_id`. The application authorizes all requests against its `user_id`.
 - Message sequence is positive and unique inside its conversation. Inserting a message, incrementing `latest_message_sequence`, and updating `last_message_at` must be one transaction.
@@ -23,7 +22,7 @@ All IDs are application-generated UUIDv7 values. All timestamps are UTC `timesta
 
 ### Identity and authentication
 
-`users` is the only account table. It has UUIDv7 `id`; `email` and lowercase `email_normalized`; Argon2id `password_hash`; status (`pending_verification`, `active`, `disabled`, `deleted`); authentication lifecycle timestamps; and normal creation/update/deletion timestamps. Constraints enforce the lowercase and deletion-state rules. Indexes enforce one active user, active-email uniqueness, and active-status lookup.
+`users` is the only account table. It has UUIDv7 `id`; `email` and lowercase `email_normalized`; Argon2id `password_hash`; status (`pending_verification`, `active`, `disabled`, `deleted`); an explicit `is_admin` bootstrap marker; authentication lifecycle timestamps; and normal creation/update/deletion timestamps. Constraints enforce the lowercase and deletion-state rules. Partial unique indexes permit one non-deleted account for each normalized email and one non-deleted administrator; an initial migration removes the retired single-account index.
 
 `auth_sessions` represents a revocable refresh-token family. It has `id`, direct `user_id`, unique `token_family_id`, expiry/revocation timestamps, and bounded device metadata. Its indexes are `(user_id, expires_at) WHERE revoked_at IS NULL` and `expires_at`.
 
@@ -51,7 +50,7 @@ All IDs are application-generated UUIDv7 values. All timestamps are UTC `timesta
 
 `tool_calls` is a redacted child audit record with `id`, `agent_run_id`, positive per-run sequence, tool/provider IDs, status, redacted input/output summaries, source URLs, timing, duration, and safe error fields. `(agent_run_id, sequence)` is unique; worker and tool-history indexes support its query paths.
 
-`idempotency_keys` makes a retry of a mutation safe. It stores method, route, opaque key, body fingerprint, optional produced conversation/run IDs, status, response snapshot, and expiry. The unique request scope is `(http_method, route, idempotency_key)`, appropriate because exactly one active account exists.
+`idempotency_keys` makes a retry of a mutation safe. It stores method, route, opaque key, body fingerprint, optional produced conversation/run IDs, status, response snapshot, and expiry. Before multi-user message submissions are enabled, its unique scope must be migrated to include a direct `user_id`; the present key is a single-account baseline artifact.
 
 ### Attachments and preferences
 

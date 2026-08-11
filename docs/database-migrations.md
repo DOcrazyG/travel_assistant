@@ -49,7 +49,7 @@ Autogeneration is a draft, not an approval. Manually review every generated fore
 ## Review checklist
 
 - Confirm the revision has exactly one parent and the repository has one head.
-- Preserve single-user ownership: user-owned records use a direct `user_id` foreign key; do not reintroduce tenant or principal columns without an approved multi-user design.
+- Preserve account ownership: user-owned records use a direct `user_id` foreign key; do not introduce tenant or principal columns without an approved organization design.
 - Use `timestamptz` for persisted time values and UTC application timestamps.
 - Express PostgreSQL JSON defaults as SQL expressions, for example `text("'{}'::jsonb")`, rather than a quoted Python string.
 - Create indexes for real authorization, history, retention, or worker queries; do not add speculative indexes.
