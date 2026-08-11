@@ -6,15 +6,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import (
-    CheckConstraint,
-    Column,
-    ForeignKeyConstraint,
-    Index,
-    Numeric,
-    UniqueConstraint,
-    text,
-)
+from sqlalchemy import CheckConstraint, Column, Index, Numeric, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
@@ -32,21 +24,10 @@ class AgentRun(TimestampedModel, table=True):
 
     __tablename__ = "agent_runs"
     __table_args__ = (
-        ForeignKeyConstraint(
-            ["conversation_id", "tenant_id"],
-            [f"{APP_SCHEMA}.conversations.id", f"{APP_SCHEMA}.conversations.tenant_id"],
-            name="fk_agent_runs_conversation_tenant",
-        ),
-        ForeignKeyConstraint(
-            ["principal_id", "tenant_id"],
-            [f"{APP_SCHEMA}.principals.id", f"{APP_SCHEMA}.principals.tenant_id"],
-            name="fk_agent_runs_principal_tenant",
-        ),
         CheckConstraint(
             "status IN ('queued', 'running', 'interrupted', 'completed', 'failed', 'cancelled')",
             name="ck_agent_runs_status",
         ),
-        UniqueConstraint("id", "tenant_id", name="uq_agent_runs_id_tenant"),
         Index(
             "uq_agent_runs_active_conversation",
             "conversation_id",
@@ -54,7 +35,7 @@ class AgentRun(TimestampedModel, table=True):
             postgresql_where=text("status IN ('queued', 'running', 'interrupted')"),
         ),
         Index("ix_agent_runs_conversation_created", "conversation_id", "created_at"),
-        Index("ix_agent_runs_tenant_status_created", "tenant_id", "status", "created_at"),
+        Index("ix_agent_runs_status_created", "status", "created_at"),
         Index(
             "ix_agent_runs_terminal_completed",
             "completed_at",
@@ -64,9 +45,7 @@ class AgentRun(TimestampedModel, table=True):
     )
 
     id: UUID = Field(default_factory=new_uuid7, primary_key=True)
-    tenant_id: UUID = Field(index=True)
-    conversation_id: UUID = Field(index=True)
-    principal_id: UUID = Field(index=True)
+    conversation_id: UUID = Field(foreign_key=f"{APP_SCHEMA}.conversations.id")
     status: str = Field(default="queued", max_length=16)
     model_alias: str | None = Field(default=None, max_length=200)
     provider_model: str | None = Field(default=None, max_length=200)
@@ -97,17 +76,14 @@ class ToolCall(SQLModel, table=True):
 
     __tablename__ = "tool_calls"
     __table_args__ = (
-        ForeignKeyConstraint(
-            ["agent_run_id", "tenant_id"],
-            [f"{APP_SCHEMA}.agent_runs.id", f"{APP_SCHEMA}.agent_runs.tenant_id"],
-            name="fk_tool_calls_agent_run_tenant",
-        ),
         CheckConstraint(
             "status IN ('queued', 'running', 'succeeded', 'failed', 'timed_out', 'cancelled')",
             name="ck_tool_calls_status",
         ),
+        CheckConstraint("sequence > 0", name="ck_tool_calls_sequence"),
+        CheckConstraint("duration_ms IS NULL OR duration_ms >= 0", name="ck_tool_calls_duration"),
         Index("uq_tool_calls_run_sequence", "agent_run_id", "sequence", unique=True),
-        Index("ix_tool_calls_tenant_tool_created", "tenant_id", "tool_name", "created_at"),
+        Index("ix_tool_calls_name_created", "tool_name", "created_at"),
         Index(
             "ix_tool_calls_active",
             "status",
@@ -118,8 +94,7 @@ class ToolCall(SQLModel, table=True):
     )
 
     id: UUID = Field(default_factory=new_uuid7, primary_key=True)
-    tenant_id: UUID = Field(index=True)
-    agent_run_id: UUID = Field(index=True)
+    agent_run_id: UUID = Field(foreign_key=f"{APP_SCHEMA}.agent_runs.id")
     sequence: int = Field()
     tool_name: str = Field(max_length=200)
     provider_call_id: str | None = Field(default=None, max_length=255)

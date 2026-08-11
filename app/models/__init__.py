@@ -5,7 +5,6 @@ Alembic. LangGraph checkpoint tables deliberately remain dependency-owned.
 """
 
 from app.models.agent_runs import AgentRun, ToolCall
-from app.models.api_keys import ApiKey, ServicePrincipal
 from app.models.attachments import Attachment, MessageAttachment
 from app.models.auth import (
     AuthOneTimeToken,
@@ -21,12 +20,10 @@ from app.models.operations import (
     SecurityAuditEvent,
 )
 from app.models.preferences import TravelPreference
-from app.models.tenancy import Principal, Tenant, TenantMembership
 from app.models.users import User
 
 __all__ = [
     "AgentRun",
-    "ApiKey",
     "Attachment",
     "AuthOneTimeToken",
     "AuthSession",
@@ -36,13 +33,9 @@ __all__ = [
     "Message",
     "MessageAttachment",
     "MessageCitation",
-    "Principal",
     "RefreshToken",
     "RevokedAccessToken",
     "SecurityAuditEvent",
-    "ServicePrincipal",
-    "Tenant",
-    "TenantMembership",
     "ToolCall",
     "TravelPreference",
     "User",

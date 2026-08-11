@@ -4,30 +4,17 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import (
-    CheckConstraint,
-    Column,
-    ForeignKeyConstraint,
-    Index,
-    Text,
-    UniqueConstraint,
-    text,
-)
+from sqlalchemy import CheckConstraint, Column, Index, Text, text
 from sqlmodel import Field
 
-from app.models.base import APP_SCHEMA, TimestampedModel, utc_datetime_field
+from app.models.base import APP_SCHEMA, TimestampedModel, new_uuid7, utc_datetime_field
 
 
 class User(TimestampedModel, table=True):
-    """A local password-account profile sharing its identifier with a principal."""
+    """The sole local account allowed to access this single-user application."""
 
     __tablename__ = "users"
     __table_args__ = (
-        ForeignKeyConstraint(
-            ["principal_id", "tenant_id"],
-            [f"{APP_SCHEMA}.principals.id", f"{APP_SCHEMA}.principals.tenant_id"],
-            name="fk_users_principal_tenant",
-        ),
         CheckConstraint(
             "status IN ('pending_verification', 'active', 'disabled', 'deleted')",
             name="ck_users_status",
@@ -36,7 +23,10 @@ class User(TimestampedModel, table=True):
             "email_normalized = lower(email_normalized)",
             name="ck_users_email_normalized",
         ),
-        UniqueConstraint("principal_id", "tenant_id", name="uq_users_principal_tenant"),
+        CheckConstraint(
+            "(status = 'deleted') = (deleted_at IS NOT NULL)",
+            name="ck_users_deleted_lifecycle",
+        ),
         Index(
             "uq_users_active_email_normalized",
             "email_normalized",
@@ -48,11 +38,16 @@ class User(TimestampedModel, table=True):
             "status",
             postgresql_where=text("deleted_at IS NULL"),
         ),
+        Index(
+            "uq_users_single_active_account",
+            text("(true)"),
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
         {"schema": APP_SCHEMA},
     )
 
-    principal_id: UUID = Field(primary_key=True)
-    tenant_id: UUID = Field(index=True)
+    id: UUID = Field(default_factory=new_uuid7, primary_key=True)
     email: str = Field(max_length=320)
     email_normalized: str = Field(max_length=320)
     password_hash: str = Field(sa_column=Column(Text, nullable=False))

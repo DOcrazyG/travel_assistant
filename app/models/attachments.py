@@ -4,15 +4,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import (
-    CheckConstraint,
-    Column,
-    ForeignKeyConstraint,
-    Index,
-    LargeBinary,
-    UniqueConstraint,
-    text,
-)
+from sqlalchemy import CheckConstraint, Column, Index, LargeBinary, text
 from sqlmodel import Field, SQLModel
 
 from app.models.base import APP_SCHEMA, new_uuid7, utc_datetime_field, utc_now
@@ -23,11 +15,6 @@ class Attachment(SQLModel, table=True):
 
     __tablename__ = "attachments"
     __table_args__ = (
-        ForeignKeyConstraint(
-            ["uploader_principal_id", "tenant_id"],
-            [f"{APP_SCHEMA}.principals.id", f"{APP_SCHEMA}.principals.tenant_id"],
-            name="fk_attachments_uploader_principal_tenant",
-        ),
         CheckConstraint("kind IN ('image', 'file')", name="ck_attachments_kind"),
         CheckConstraint(
             "upload_status IN "
@@ -42,7 +29,11 @@ class Attachment(SQLModel, table=True):
             "processing_status IN ('not_requested', 'queued', 'processed', 'failed')",
             name="ck_attachments_processing_status",
         ),
-        UniqueConstraint("id", "tenant_id", name="uq_attachments_id_tenant"),
+        CheckConstraint("byte_size >= 0", name="ck_attachments_byte_size"),
+        CheckConstraint(
+            "(upload_status = 'deleted') = (deleted_at IS NOT NULL)",
+            name="ck_attachments_deleted_lifecycle",
+        ),
         Index(
             "uq_attachments_object_location",
             "storage_provider",
@@ -51,9 +42,8 @@ class Attachment(SQLModel, table=True):
             unique=True,
         ),
         Index(
-            "ix_attachments_uploader_created",
-            "tenant_id",
-            "uploader_principal_id",
+            "ix_attachments_user_created",
+            "user_id",
             "created_at",
         ),
         Index("ix_attachments_upload_expiry", "upload_status", "expires_at"),
@@ -66,8 +56,7 @@ class Attachment(SQLModel, table=True):
     )
 
     id: UUID = Field(default_factory=new_uuid7, primary_key=True)
-    tenant_id: UUID = Field(index=True)
-    uploader_principal_id: UUID = Field(index=True)
+    user_id: UUID = Field(foreign_key=f"{APP_SCHEMA}.users.id")
     storage_provider: str = Field(default="minio", max_length=32)
     bucket: str = Field(max_length=255)
     object_key: str = Field(max_length=1024)
@@ -91,22 +80,13 @@ class MessageAttachment(SQLModel, table=True):
 
     __tablename__ = "message_attachments"
     __table_args__ = (
-        ForeignKeyConstraint(
-            ["message_id", "tenant_id"],
-            [f"{APP_SCHEMA}.messages.id", f"{APP_SCHEMA}.messages.tenant_id"],
-            name="fk_message_attachments_message_tenant",
-        ),
-        ForeignKeyConstraint(
-            ["attachment_id", "tenant_id"],
-            [f"{APP_SCHEMA}.attachments.id", f"{APP_SCHEMA}.attachments.tenant_id"],
-            name="fk_message_attachments_attachment_tenant",
-        ),
         Index("uq_message_attachments_position", "message_id", "position", unique=True),
         {"schema": APP_SCHEMA},
     )
 
-    message_id: UUID = Field(primary_key=True)
-    attachment_id: UUID = Field(primary_key=True, unique=True)
-    tenant_id: UUID = Field(index=True)
+    message_id: UUID = Field(foreign_key=f"{APP_SCHEMA}.messages.id", primary_key=True)
+    attachment_id: UUID = Field(
+        foreign_key=f"{APP_SCHEMA}.attachments.id", primary_key=True, unique=True
+    )
     position: int = Field()
     created_at: datetime = utc_datetime_field(default_factory=utc_now)

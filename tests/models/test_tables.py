@@ -15,7 +15,6 @@ from app.models.base import APP_SCHEMA, new_uuid7
 
 def test_all_application_tables_are_registered_in_the_app_schema() -> None:
     expected_tables = {
-        "api_keys",
         "agent_runs",
         "attachments",
         "auth_one_time_tokens",
@@ -26,13 +25,9 @@ def test_all_application_tables_are_registered_in_the_app_schema() -> None:
         "message_attachments",
         "message_citations",
         "messages",
-        "principals",
         "refresh_tokens",
         "revoked_access_tokens",
         "security_audit_events",
-        "service_principals",
-        "tenants",
-        "tenant_memberships",
         "tool_calls",
         "travel_preferences",
         "users",
@@ -50,9 +45,22 @@ def test_conversation_history_and_run_indexes_are_declared() -> None:
     messages = SQLModel.metadata.tables[f"{APP_SCHEMA}.messages"]
     agent_runs = SQLModel.metadata.tables[f"{APP_SCHEMA}.agent_runs"]
 
-    assert "ix_conversations_owner_history" in {index.name for index in conversations.indexes}
+    assert "ix_conversations_user_history" in {index.name for index in conversations.indexes}
     assert "ix_messages_conversation_history" in {index.name for index in messages.indexes}
     assert "uq_agent_runs_active_conversation" in {index.name for index in agent_runs.indexes}
+
+
+def test_single_user_models_have_no_tenant_or_principal_columns() -> None:
+    forbidden_columns = {"tenant_id", "principal_id", "owner_principal_id", "user_principal_id"}
+
+    application_tables = [
+        table for table in SQLModel.metadata.tables.values() if table.schema == APP_SCHEMA
+    ]
+
+    assert all(forbidden_columns.isdisjoint(table.columns.keys()) for table in application_tables)
+
+    users = SQLModel.metadata.tables[f"{APP_SCHEMA}.users"]
+    assert "uq_users_single_active_account" in {index.name for index in users.indexes}
 
 
 def test_uuid7_defaults_are_uuid_version_seven() -> None:

@@ -16,4 +16,4 @@ def test_migration_history_has_one_head_and_an_initial_schema_revision() -> None
 
     migration_source = Path(initial_revision.path).read_text(encoding="utf-8")
     assert 'op.execute("CREATE SCHEMA IF NOT EXISTS app")' in migration_source
-    assert 'op.execute("DROP SCHEMA IF EXISTS app")' in migration_source
+    assert 'op.execute("DROP SCHEMA IF EXISTS app CASCADE")' in migration_source

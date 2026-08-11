@@ -4,14 +4,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import (
-    CheckConstraint,
-    Column,
-    ForeignKeyConstraint,
-    Index,
-    LargeBinary,
-    text,
-)
+from sqlalchemy import CheckConstraint, Column, Index, LargeBinary, text
 from sqlmodel import Field, SQLModel
 
 from app.models.base import APP_SCHEMA, new_uuid7, utc_datetime_field, utc_now
@@ -22,14 +15,9 @@ class AuthSession(SQLModel, table=True):
 
     __tablename__ = "auth_sessions"
     __table_args__ = (
-        ForeignKeyConstraint(
-            ["user_principal_id", "tenant_id"],
-            [f"{APP_SCHEMA}.users.principal_id", f"{APP_SCHEMA}.users.tenant_id"],
-            name="fk_auth_sessions_user_tenant",
-        ),
         Index(
             "ix_auth_sessions_active_user_expiry",
-            "user_principal_id",
+            "user_id",
             "expires_at",
             postgresql_where=text("revoked_at IS NULL"),
         ),
@@ -38,8 +26,7 @@ class AuthSession(SQLModel, table=True):
     )
 
     id: UUID = Field(default_factory=new_uuid7, primary_key=True)
-    tenant_id: UUID = Field(index=True)
-    user_principal_id: UUID = Field(index=True)
+    user_id: UUID = Field(foreign_key=f"{APP_SCHEMA}.users.id")
     token_family_id: UUID = Field(default_factory=new_uuid7, unique=True)
     created_at: datetime = utc_datetime_field(default_factory=utc_now)
     last_used_at: datetime | None = utc_datetime_field(default=None)
@@ -61,7 +48,7 @@ class RefreshToken(SQLModel, table=True):
     )
 
     id: UUID = Field(default_factory=new_uuid7, primary_key=True)
-    session_id: UUID = Field(foreign_key=f"{APP_SCHEMA}.auth_sessions.id", index=True)
+    session_id: UUID = Field(foreign_key=f"{APP_SCHEMA}.auth_sessions.id")
     token_hash: bytes = Field(sa_column=Column(LargeBinary, nullable=False, unique=True))
     issued_at: datetime = utc_datetime_field(default_factory=utc_now)
     expires_at: datetime = utc_datetime_field()
@@ -80,7 +67,7 @@ class RevokedAccessToken(SQLModel, table=True):
     )
 
     jti: UUID = Field(primary_key=True)
-    user_principal_id: UUID = Field(foreign_key=f"{APP_SCHEMA}.users.principal_id", index=True)
+    user_id: UUID = Field(foreign_key=f"{APP_SCHEMA}.users.id")
     expires_at: datetime = utc_datetime_field()
     revoked_at: datetime = utc_datetime_field(default_factory=utc_now)
     reason: str = Field(max_length=100)
@@ -97,7 +84,7 @@ class AuthOneTimeToken(SQLModel, table=True):
         ),
         Index(
             "ix_auth_one_time_tokens_user_purpose_created",
-            "user_principal_id",
+            "user_id",
             "purpose",
             "created_at",
         ),
@@ -106,7 +93,7 @@ class AuthOneTimeToken(SQLModel, table=True):
     )
 
     id: UUID = Field(default_factory=new_uuid7, primary_key=True)
-    user_principal_id: UUID = Field(foreign_key=f"{APP_SCHEMA}.users.principal_id", index=True)
+    user_id: UUID = Field(foreign_key=f"{APP_SCHEMA}.users.id")
     purpose: str = Field(max_length=32)
     token_hash: bytes = Field(sa_column=Column(LargeBinary, nullable=False, unique=True))
     expires_at: datetime = utc_datetime_field()
