@@ -20,7 +20,7 @@ The first release supports only authenticated users. There are no anonymous or g
 
 | Identifier | Created by | Visibility | Purpose |
 | --- | --- | --- | --- |
-| `principal_id` | identity layer | request context only | Canonical authenticated user or service principal |
+| `user_id` | identity layer | request context only | The authenticated local user |
 | `conversation_id` | application | returned to caller | Unguessable public identifier for one conversation |
 | `thread_id` | application | internal only | Stable LangGraph checkpoint sequence for that conversation |
 | `run_id` | application | returned to caller | One invocation of the Agent graph |
@@ -34,25 +34,25 @@ The first release supports only authenticated users. There are no anonymous or g
 
 ### User access
 
-All user-facing requests use `Authorization: Bearer <access-token>`. The access token is a short-lived JWT, recommended at 15 minutes. The service validates at least `iss`, `aud`, `exp`, `iat`, `sub`, and `jti`, then resolves `sub` to an active local user/principal record.
+All user-facing requests use `Authorization: Bearer <access-token>`. The access token is a short-lived JWT, recommended at 15 minutes. The service validates at least `iss`, `aud`, `exp`, `iat`, `sub`, and `jti`, then resolves `sub` to the active local user record.
 
 Access-token expiry alone is insufficient for account disablement and logout. Refresh sessions are persisted and rotated; the associated token ID or session must be revocable. A refresh token is never sent to the Agent, stored in a conversation, or exposed to browser JavaScript when an HttpOnly cookie flow is available.
 
-The initial product owns registration, login, email verification, password reset, and refresh-token rotation. Passwords are hashed with Argon2id and never logged or returned. The service signs its own access JWTs from a tightly managed signing key; a future OIDC integration can replace this issuer behind the same principal contract.
+The initial product owns registration, login, email verification, password reset, and refresh-token rotation. Passwords are hashed with Argon2id and never logged or returned. The service signs its own access JWTs from a tightly managed signing key; a future OIDC integration can replace this issuer behind the same user contract.
 
 ### Machine access
 
-Programmatic integrations use a separately issued API key, not a long-lived user JWT. Keys identify a service principal, are stored as hashes, shown only at creation, and have scopes, rate limits, expiry, and revocation. Initially, a service principal may access only conversations it owns. Delegated access to a user's conversations requires an explicit future authorization model and is out of scope.
+Programmatic API-key integrations are out of scope for this single-user release. The only supported credential is a local-user JWT plus its rotating refresh token.
 
 ### Authorization rule
 
 For every request that carries a `conversation_id`, including streams and `/resume`, the service verifies:
 
 ```text
-authenticated credential → active principal → conversation owner/principal match → thread lookup → execution
+authenticated credential → active user → conversation `user_id` match → thread lookup → execution
 ```
 
-Failure returns `401` for missing, invalid, expired, or revoked credentials. An authenticated principal that does not own the conversation receives `404` to avoid confirming that the resource exists.
+Failure returns `401` for missing, invalid, expired, or revoked credentials. A request whose user does not own the conversation receives `404` to avoid confirming that the resource exists.
 
 ## 4. Chat invocation contract
 
@@ -65,7 +65,7 @@ Idempotency-Key: <opaque-client-generated-key>  # required for a message submiss
 Content-Type: application/json
 ```
 
-`Idempotency-Key` is unique per authenticated principal and request body. Replaying the same key and body returns the original accepted result/run; replaying it with a different body returns `409`. Keys have a finite retention period configured with the idempotency store.
+`Idempotency-Key` is unique per method and route for the sole authenticated user, together with the request body fingerprint. Replaying the same key and body returns the original accepted result/run; replaying it with a different body returns `409`. Keys have a finite retention period configured with the idempotency store.
 
 ### Request
 
@@ -142,7 +142,7 @@ The REST resource APIs remain available for product UI and management operations
 | Method | Path | Meaning |
 | --- | --- | --- |
 | `POST` | `/api/v1/conversations` | Explicitly create an empty conversation; optional because first chat can create one. |
-| `GET` | `/api/v1/conversations` | List only the authenticated principal's conversations. |
+| `GET` | `/api/v1/conversations` | List only the authenticated user's conversations. |
 | `GET` | `/api/v1/conversations/{conversation_id}` | Return conversation and paginated messages after ownership verification. |
 | `DELETE` | `/api/v1/conversations/{conversation_id}` | Make the conversation inaccessible immediately and schedule retention-compliant purge of messages and checkpoints. |
 | `POST` | `/api/v1/conversations/{conversation_id}/resume` | Resume a persisted LangGraph interrupt after ownership and run-status validation. |
@@ -178,14 +178,13 @@ Non-streaming errors and SSE `error` events use a safe Problem Details-like payl
 }
 ```
 
-The API never returns provider credentials, raw stack traces, unredacted tool input, or another principal's identifiers. Logs and traces correlate `request_id`, a redacted `principal_id`, `conversation_id`, `thread_id`, and `run_id`.
+The API never returns provider credentials, raw stack traces, unredacted tool input, or private identifiers. Logs and traces correlate `request_id`, a redacted `user_id`, `conversation_id`, `thread_id`, and `run_id`.
 
 ## 9. Decisions recorded
 
 - Authenticated users only; no guest/anonymous conversation mode.
 - JWT is the user-facing access credential; use short-lived access tokens, rotating refresh sessions, and revocation state.
-- Build first-party registration/login with Argon2id password hashes, email verification, password reset, and rotating refresh tokens; preserve the principal boundary for a future OIDC integration.
-- API keys are separate machine credentials with service-principal isolation.
+- Build first-party registration/login with Argon2id password hashes, email verification, password reset, and rotating refresh tokens; preserve the user boundary for a future OIDC integration.
 - The first chat call auto-creates a conversation; subsequent calls provide `conversation_id`.
 - Follow OpenAI-style request, response, and streaming conventions without claiming drop-in SDK compatibility.
 - One active run per conversation and idempotency protection for submissions.

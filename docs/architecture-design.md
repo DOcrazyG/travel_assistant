@@ -6,7 +6,7 @@
 
 ## 1. Context and goals
 
-The repository now contains only an engineering baseline. The target system is a multi-user travel-assistant backend with HTTP APIs, conversation state, controlled external tools, operational safeguards, and observability.
+The repository now contains only an engineering baseline. The target system is a locally authenticated single-user travel-assistant backend with HTTP APIs, conversation state, controlled external tools, operational safeguards, and observability.
 
 This design takes inspiration from [fastapi-langgraph-agent-production-ready-template](https://github.com/wassim249/fastapi-langgraph-agent-production-ready-template): an API layer, LangGraph orchestration, independent services, database migrations, caching, authentication, rate limiting, observability, and evaluation. The first product scope is travel advice and itinerary drafts. Booking, payments, and other irreversible travel decisions are explicitly excluded.
 
@@ -107,7 +107,7 @@ Exact versions are locked in `pyproject.toml` and `uv.lock`. New Agent code uses
 │   │   └── health.py
 │   ├── core/
 │   │   ├── config.py                 # Settings and environment configuration
-│   │   ├── security.py               # JWT/API key and authorization
+│   │   ├── security.py               # JWT and local-account authorization
 │   │   ├── middleware.py             # Request IDs, logging context, timings
 │   │   ├── limiter.py
 │   │   ├── cache.py
@@ -149,13 +149,12 @@ The complete business schema, index strategy, retention, MinIO attachment bounda
 
 - `users`: identity and status. The first release supports authenticated users only; anonymous conversations are out of scope.
 - `auth_sessions`, `refresh_tokens`, and `revoked_access_tokens`: self-managed password-login sessions, rotating refresh tokens, and JWT revocation state (`jti`, expiry, revoked timestamp, and minimal device metadata).
-- `api_keys`: hashed, scoped machine credentials linked to a service principal. They are distinct from user JWTs.
-- `conversations`: a continuous conversation linked to `user_id`, `thread_id`, title, and archive state.
+- `conversations`: a continuous conversation linked directly to `user_id`, `thread_id`, title, and archive state.
 - `messages`: user, assistant, tool, and system messages with ordering, content, citations, and token usage.
 - `agent_runs`: graph-execution status, model, duration, errors, and trace ID.
 - `tool_calls`: tool name, redacted input, result summary, source, duration, and errors.
 
-`conversations.conversation_id` is the public, unguessable API identifier. It maps one-to-one to the internal `thread_id`, which is the unique join key for LangGraph checkpoints. API calls must provide or receive a server-created conversation; process memory must not represent production session state. The authenticated principal is checked against the conversation on every read, write, stream, and resume operation.
+`conversations.conversation_id` is the public, unguessable API identifier. It maps one-to-one to the internal `thread_id`, which is the unique join key for LangGraph checkpoints. API calls must provide or receive a server-created conversation; process memory must not represent production session state. The authenticated user is checked against the conversation on every read, write, stream, and resume operation.
 
 ### Long-term preferences and memory
 
@@ -243,9 +242,8 @@ Tool inputs and outputs use Pydantic schemas. Every external call has connection
 
 ### Security
 
-- Require authenticated identities; do not support anonymous conversations in the first release. JWT access tokens identify logged-in users, and separately managed API keys identify machine principals. Inject the resolved principal into request context; never infer it from model text.
+- Require the authenticated local account; do not support anonymous conversations. JWT access tokens identify the user and request context carries that `user_id`; never infer it from model text.
 - Use short-lived JWT access tokens and rotating refresh tokens. Validate issuer, audience, expiration, subject, and token ID; persist revocation and user-disable state. The first release owns password login and uses Argon2id password hashes; an external OIDC provider remains a future integration option.
-- API keys are stored only as hashes, shown only once at creation, scoped and rate-limited separately, and must not impersonate a user or access that user's conversations without an explicit future delegation model.
 - Enforce an ownership check before resolving a `conversation_id` to a `thread_id`. A valid token alone never authorizes a conversation.
 - Serialize active runs for each conversation and accept an `Idempotency-Key` for message submissions so retries cannot duplicate agent or tool execution.
 - Limit requests and concurrent streams by user and IP. Apply per-run tool-call counts, total duration, and cost budgets.
@@ -276,7 +274,7 @@ Tool inputs and outputs use Pydantic schemas. Every external call has connection
 
 The first production candidate must satisfy all of the following:
 
-- Multi-turn travel advice works through protected v1 APIs with SSE streaming; all conversations belong to an authenticated user or service principal.
+- Multi-turn travel advice works through protected v1 APIs with SSE streaming; all conversations belong to the authenticated local user.
 - A conversation can resume its LangGraph state after a process restart.
 - Weather and attraction tools have schemas, timeouts, failure handling, and sources with retrieval times.
 - Every request has correlated logs, basic metrics, and an Agent trace.
