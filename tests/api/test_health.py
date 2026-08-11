@@ -44,7 +44,7 @@ def test_postgres_engine_uses_the_configured_settings() -> None:
         assert engine.url.database == "test_database"
         assert engine.url.username == "test_user"
     finally:
-        engine.dispose()
+        asyncio.run(engine.dispose())
 
 
 def test_database_is_created_when_it_does_not_exist(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -113,7 +113,7 @@ def test_lifespan_verifies_and_disposes_the_database_engine(
     class FakeEngine:
         disposed = False
 
-        def dispose(self) -> None:
+        async def dispose(self) -> None:
             self.disposed = True
 
     engine = FakeEngine()
@@ -123,7 +123,7 @@ def test_lifespan_verifies_and_disposes_the_database_engine(
     def create_engine(_: Settings) -> FakeEngine:
         return engine
 
-    def check_connection(_: FakeEngine) -> None:
+    async def check_connection(_: FakeEngine) -> None:
         nonlocal connection_checked
         connection_checked = True
 
@@ -133,12 +133,14 @@ def test_lifespan_verifies_and_disposes_the_database_engine(
 
     monkeypatch.setattr(main_module, "create_database_engine", create_engine)
     monkeypatch.setattr(main_module, "check_database_connection", check_connection)
+    monkeypatch.setattr(main_module, "create_session_factory", lambda _: object())
     monkeypatch.setattr(main_module, "ensure_database_exists", ensure_database)
     application = create_app(Settings(environment="test"))
 
     async def manage_lifespan() -> None:
         async with main_module.lifespan(application):
             assert application.state.database_engine is engine
+            assert application.state.session_factory is not None
             assert database_created
             assert connection_checked
             assert not engine.disposed

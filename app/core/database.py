@@ -1,8 +1,12 @@
-"""PostgreSQL engine creation and connectivity checks."""
+"""Async PostgreSQL engine, session, and connectivity helpers."""
 
+from collections.abc import AsyncGenerator
+
+from fastapi import Request
 from sqlalchemy import URL, text
-from sqlalchemy.engine import Engine
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 from sqlmodel import create_engine
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.config import Settings
 
@@ -43,10 +47,10 @@ def ensure_database_exists(settings: Settings) -> None:
         maintenance_engine.dispose()
 
 
-def create_database_engine(settings: Settings) -> Engine:
-    """Create the PostgreSQL pool used by system-management services."""
+def create_database_engine(settings: Settings) -> AsyncEngine:
+    """Create the async PostgreSQL pool used by request-handling services."""
 
-    return create_engine(
+    return create_async_engine(
         create_database_url(settings),
         echo=settings.postgres_echo,
         pool_pre_ping=True,
@@ -55,8 +59,26 @@ def create_database_engine(settings: Settings) -> Engine:
     )
 
 
-def check_database_connection(engine: Engine) -> None:
-    """Raise if the database cannot accept a simple connection."""
+def create_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
+    """Create request-scoped SQLModel async sessions for an application engine."""
 
-    with engine.connect() as connection:
-        connection.execute(text("SELECT 1"))
+    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+
+async def get_session(request: Request) -> AsyncGenerator[AsyncSession, None]:
+    """Yield one uncommitted async session for the current request.
+
+    Services own transaction boundaries with ``async with session.begin()`` so a
+    CRUD call stays composable with all other writes in the request.
+    """
+
+    session_factory: async_sessionmaker[AsyncSession] = request.app.state.session_factory
+    async with session_factory() as session:
+        yield session
+
+
+async def check_database_connection(engine: AsyncEngine) -> None:
+    """Raise if the database cannot accept a simple async connection."""
+
+    async with engine.connect() as connection:
+        await connection.execute(text("SELECT 1"))

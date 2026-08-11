@@ -12,6 +12,7 @@ from app.core.config import Settings, get_settings
 from app.core.database import (
     check_database_connection,
     create_database_engine,
+    create_session_factory,
     ensure_database_exists,
 )
 
@@ -24,16 +25,17 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
     ensure_database_exists(settings)
     engine = create_database_engine(settings)
     try:
-        check_database_connection(engine)
+        await check_database_connection(engine)
     except SQLAlchemyError:
-        engine.dispose()
+        await engine.dispose()
         raise
 
     application.state.database_engine = engine
+    application.state.session_factory = create_session_factory(engine)
     try:
         yield
     finally:
-        engine.dispose()
+        await engine.dispose()
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
