@@ -1,5 +1,7 @@
 # Database Migration Guide
 
+[中文版本](database-migrations.zh-CN.md)
+
 **Status:** Implemented
 
 This project uses Alembic to version application-owned PostgreSQL tables. The current baseline revision is `373c9d3f1e26` (`create application schema`). It creates the `app` schema, its current 21 tables, indexes, constraints, JSONB defaults, and UTC `timestamptz` columns.

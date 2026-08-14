@@ -1,18 +1,20 @@
 # Conversation API and Identity Contract
 
-**Status:** Approved contract; P1 foundation implemented and P2.0 non-streaming execution in progress
+[中文版本](conversation-api-design.zh-CN.md)
+
+**Status:** Approved contract; P2 single-Agent JSON and SSE execution implemented
 **Last updated:** 2026-08-10  
 **Applies to:** Authenticated conversational calls, conversation ownership, and LangGraph state recovery
 
 ## 1. Intent and scope
 
-The service exposes a chat invocation that feels familiar to an LLM caller while retaining server-owned conversation state. It adopts the useful parts of the OpenAI Chat Completions convention:
+The service exposes a response invocation that feels familiar to an LLM caller while retaining server-owned conversation state. It adopts the useful parts of the stable OpenAI Responses convention:
 
-- request fields such as `model`, `messages`, and `stream`;
-- a completion response with `id`, `object`, `created`, `choices`, and `usage`;
-- incremental text in an OpenAI-shaped `chat.completion.chunk` payload.
+- request fields such as `model`, `input`, and `stream`;
+- a response object with `id`, `object`, `created_at`, `status`, `output`, and `usage`;
+- ordered incremental text in `response.output_text.delta` events.
 
-This is an **inspired contract**, not a promise that an unmodified OpenAI Python SDK or every OpenAI request option will work. The service has application-specific fields and events, including `conversation_id`, tool progress, interruptions, and citations.
+This is an **inspired contract**, not a promise that an unmodified OpenAI Python SDK or every OpenAI request option will work. The service adds a durable `conversation` reference. Its protocol DTOs define text, image, file, and function-call records, while the public conversation request DTO exposes one user input and the current single-Agent runtime enables only text input/output.
 
 The first release supports only authenticated users. There are no anonymous or guest conversations.
 
@@ -46,7 +48,7 @@ Programmatic API-key integrations are out of scope for this release. The only su
 
 ### Authorization rule
 
-For every request that carries a `conversation_id`, including streams and `/resume`, the service verifies:
+For every request that carries a `conversation_id`, including streams, the service verifies:
 
 ```text
 authenticated credential → active user → conversation `user_id` match → thread lookup → execution
@@ -54,12 +56,12 @@ authenticated credential → active user → conversation `user_id` match → th
 
 Failure returns `401` for missing, invalid, expired, or revoked credentials. A request whose user does not own the conversation receives `404` to avoid confirming that the resource exists.
 
-## 4. Chat invocation contract
+## 4. Response invocation contract
 
 ### Endpoint
 
 ```text
-POST /v1/chat/completions
+POST /api/v1/conversations/{conversation_id}/messages
 Authorization: Bearer <access-token>
 Idempotency-Key: <opaque-client-generated-key>  # required for a message submission
 Content-Type: application/json
@@ -72,11 +74,14 @@ Content-Type: application/json
 ```json
 {
   "model": "travel-assistant",
-  "messages": [
-    {"role": "user", "content": "请安排上海三日游"}
-  ],
+  "input": {
+    "type": "message",
+    "role": "user",
+    "content": [
+      {"type": "input_text", "text": "请安排上海三日游"}
+    ]
+  },
   "stream": false,
-  "conversation_id": null,
   "metadata": {"locale": "zh-CN", "timezone": "Asia/Shanghai"}
 }
 ```
@@ -84,53 +89,56 @@ Content-Type: application/json
 | Field | Required | Rules |
 | --- | --- | --- |
 | `model` | yes | An application model alias, not necessarily a provider model name. |
-| `messages` | yes | One or more new input messages for this turn. At least one must have `role: "user"`. The first release rejects client-supplied `assistant` and `tool` messages. |
+| `input` | yes | One new user message for this turn. Its content is a non-empty list of `input_text`, `input_image`, or `input_file` parts. Image and file values are type-supported but return `input_content_not_supported` until a provider-neutral multimodal adapter is delivered. |
 | `stream` | no | Defaults to `false`; `true` returns `text/event-stream`. |
-| `conversation_id` | no | Omit or set `null` to create a conversation. Supply the returned value to continue it. |
 | `metadata` | no | Small, validated request context such as locale/timezone. It is not an authorization channel and must not contain secrets or unbounded personal data. |
 
-The caller sends only new messages for the current turn. It must not resend the entire prior transcript after a `conversation_id` is established. The service loads the canonical history and LangGraph checkpoint using the mapped `thread_id`, appends validated input once, and controls system prompts and tool messages itself.
+The caller sends only the new input for the current turn. It must not resend the entire prior transcript. The service loads the canonical history and LangGraph checkpoint using the mapped `thread_id`, appends input once, and controls system prompts itself. Future tool turns use `function_call` output items and matching `function_call_output` input items. Those are protocol-level records; tool selection and execution remain server-owned rather than client request fields.
+
+### Type ownership
+
+`app.schemas.responses` is the broad protocol type system, modeled after the OpenAI Responses resource. `app.schemas.conversation_requests` is the request boundary for this endpoint and accepts only one user message. `app.schemas.messages` is the independent durable-transcript schema. This distinction prevents a future protocol addition from becoming a public capability before its authorization, execution, and persistence rules exist.
 
 ### Non-streaming response
 
 ```json
 {
-  "id": "run_01J...",
-  "object": "chat.completion",
-  "created": 1786358400,
+  "id": "019...",
+  "object": "response",
+  "created_at": 1786358400,
   "model": "travel-assistant",
-  "choices": [
+  "status": "completed",
+  "output": [
     {
-      "index": 0,
-      "message": {"role": "assistant", "content": "可以，先确认你的出行日期……"},
-      "finish_reason": "stop"
+      "id": "019...",
+      "type": "message",
+      "role": "assistant",
+      "status": "completed",
+      "content": [
+        {"type": "output_text", "text": "可以，先确认你的出行日期……", "annotations": []}
+      ]
     }
   ],
-  "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
-  "travel_assistant": {
-    "conversation_id": "conv_01J...",
-    "run_id": "run_01J...",
-    "request_id": "req_01J...",
-    "citations": [],
-    "interrupted": false
-  }
+  "conversation": {"id": "019...", "object": "conversation"},
+  "usage": null
 }
 ```
 
-`usage` is present when provider accounting is available; values may be omitted or marked provisional while a stream is active. The `travel_assistant` object is the reserved namespace for application extensions and prevents collision with future OpenAI-shaped fields.
+`usage` is present when provider accounting is available. The response ID is the application Agent-run ID; each output item's ID is the durable assistant-message ID.
 
 ### Streaming response
 
-The stream uses SSE. Text deltas are serialized as JSON with `object: "chat.completion.chunk"`; lifecycle, tool, and approval data use named application events. Every event contains `request_id`, `conversation_id`, and `run_id`.
+The stream uses SSE and follows the Responses event naming convention. Each payload contains its `type` and a strictly increasing `sequence_number`; item and content events also carry the stable assistant `item_id`.
 
 | SSE event | Payload intent |
 | --- | --- |
-| `meta` | IDs, selected model, and newly created conversation ID |
-| `status` | queued, running, or retrying state |
-| `token` | An OpenAI-shaped `chat.completion.chunk` text delta |
-| `tool_call` / `tool_result` | Redacted progress information, never provider secrets |
-| `interrupt` | A durable approval/clarification pause that can later be resumed |
-| `final` | Final completion, usage, citations, and completion status |
+| `response.created` / `response.in_progress` | Response envelope and active lifecycle state |
+| `response.output_item.added` | Durable in-progress assistant message item |
+| `response.content_part.added` | Empty `output_text` part created for that message |
+| `response.output_text.delta` | Incremental rendered text |
+| `response.output_text.done`, `response.content_part.done`, `response.output_item.done` | Finalized nested content and item |
+| `response.completed` | Final response envelope with complete output |
+| `response.failed` | Terminal failed response envelope |
 | `error` | Safe Problem Details-like error payload |
 
 Browser clients should use a `fetch`-based streaming reader so they can send the Bearer authorization header. Native `EventSource` does not provide a suitable standard way to set that header.
@@ -145,7 +153,6 @@ The REST resource APIs remain available for product UI and management operations
 | `GET` | `/api/v1/conversations` | List only the authenticated user's conversations. |
 | `GET` | `/api/v1/conversations/{conversation_id}` | Return conversation and paginated messages after ownership verification. |
 | `DELETE` | `/api/v1/conversations/{conversation_id}` | Make the conversation inaccessible immediately and schedule retention-compliant purge of messages and checkpoints. |
-| `POST` | `/api/v1/conversations/{conversation_id}/resume` | Resume a persisted LangGraph interrupt after ownership and run-status validation. |
 
 The chat endpoint and REST endpoint invoke the same conversation service. They must not implement separate history, authorization, or persistence rules.
 
@@ -153,7 +160,7 @@ The chat endpoint and REST endpoint invoke the same conversation service. They m
 
 At most one active Agent run is permitted for a `conversation_id`. A second non-idempotent message while a run is active receives `409` with code `conversation_busy` and the active `run_id`; clients can wait for the stream to finish and retry with a new idempotency key. This prevents two runs from reading the same checkpoint and writing divergent state.
 
-Runs use explicit states: `queued`, `running`, `interrupted`, `completed`, `failed`, and `cancelled`. An interrupted run keeps its checkpoint and can be resumed only in the same owned conversation. Retrying an HTTP request is not the same as resuming an interrupted run.
+Runs use explicit states: `queued`, `running`, `completed`, `failed`, and `cancelled`. Retrying an HTTP request is not the same as starting a second run.
 
 All externally observable writes (message insert, run record, tool audit record, and graph persistence boundary) must be designed to be idempotent. External side effects remain prohibited in the first travel-advice release.
 
@@ -185,7 +192,7 @@ The API never returns provider credentials, raw stack traces, unredacted tool in
 - Authenticated users only; no guest/anonymous conversation mode.
 - JWT is the user-facing access credential; use short-lived access tokens, rotating refresh sessions, and revocation state.
 - Build first-party registration/login with Argon2id password hashes, email verification, password reset, and rotating refresh tokens; preserve the user boundary for a future OIDC integration.
-- The first chat call auto-creates a conversation; subsequent calls provide `conversation_id`.
-- Follow OpenAI-style request, response, and streaming conventions without claiming drop-in SDK compatibility.
+- Conversations are created explicitly before message submission.
+- Follow stable OpenAI Responses-style request, response, and streaming conventions without claiming drop-in SDK compatibility.
 - One active run per conversation and idempotency protection for submissions.
 - Retention periods are 180 days for conversation/checkpoint/run data, 365 days for security audit data, 24 hours for idempotency records, and 35 days for backups; explicit deletion is immediately effective and purged within 30 days.

@@ -1,5 +1,7 @@
 # Travel Assistant Backend Architecture Design
 
+[中文版本](architecture-design.zh-CN.md)
+
 **Status:** Approved target architecture; P2.0 single-Agent conversation loop implemented
 **Last updated:** 2026-08-14
 **Applies to:** Building a deployable, maintainable FastAPI and LangGraph service from the engineering baseline
@@ -70,9 +72,9 @@ sequenceDiagram
     G->>D: Restore checkpointed message history
     G->>G: Apply system prompt and call one LLM
     G->>D: Persist updated checkpoint
-    G-->>A: Assistant reply or token deltas
+    G-->>A: Assistant reply or text deltas
     A->>D: Store assistant message and completed run
-    A-->>C: JSON completion or SSE status/token/final/error events
+    A-->>C: JSON response or Responses-style SSE events
 ```
 
 ## 4. Technology choices
@@ -196,7 +198,7 @@ Preference writes, itinerary exports, sharing links, and any future booking acti
 
 ## 8. API design (v1)
 
-The complete request, response, streaming, identity, and concurrency contract lives in [Conversation API and identity contract](conversation-api-design.md). The API borrows the familiar OpenAI Chat Completions shape (`model`, `messages`, `stream`, `choices`, and `usage`) but deliberately does not promise drop-in compatibility with the OpenAI SDK. `conversation_id` is a documented application extension, not an OpenAI field.
+The complete request, response, streaming, identity, and concurrency contract lives in [Conversation API and identity contract](conversation-api-design.md). The API follows the stable OpenAI **Responses** vocabulary: a new `input` message produces one `response` with typed `output` items, and a stream contains ordered `response.*` events. Its DTOs cover text, image, file, function tool definitions, function calls, and function outputs; execution remains deliberately text-only and tool-free in this single-Agent phase. The application-owned `conversation` reference binds that response to durable history.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
@@ -206,12 +208,12 @@ The complete request, response, streaming, identity, and concurrency contract li
 | `GET` | `/api/v1/conversations` | List the current user's conversations with pagination |
 | `GET` | `/api/v1/conversations/{id}` | Retrieve a conversation and messages |
 | `POST` | `/api/v1/conversations/{id}/messages` | Submit a message and return JSON or an SSE stream |
-| `POST` | `/api/v1/conversations/{id}/resume` | Resume an interrupted approval or clarification flow |
 | `GET` | `/api/v1/preferences` | Read confirmed preferences |
 | `PUT` | `/api/v1/preferences` | Explicitly update preferences |
-| `POST` | `/v1/chat/completions` | OpenAI-shaped conversational invocation; creates or continues a conversation |
 
-SSE events use the types `meta`, `status`, `token`, `tool_call`, `tool_result`, `interrupt`, `final`, and `error`. Every event contains `request_id`, `conversation_id`, and `run_id`. The `/v1/chat/completions` stream represents text deltas using an OpenAI-shaped `chat.completion.chunk` payload, plus the documented application events. Streaming and non-streaming responses use the same domain execution result rather than separate Agent implementations.
+The text stream emits `response.created`, `response.in_progress`, `response.output_item.added`, `response.content_part.added`, `response.output_text.delta`, and terminal `response.completed` events. Each event includes an increasing `sequence_number`; output events have a stable persisted `item_id`. A failed run emits `response.failed` followed by `error`. Streaming and non-streaming responses use the same domain execution result rather than separate Agent implementations.
+
+Schema ownership is deliberately split: `schemas/responses.py` contains the broad Responses-inspired protocol (multimodal parts, tool definitions, function calls, output items, and stream events); `schemas/conversation_requests.py` contains the narrower authenticated HTTP input DTO; and `schemas/messages.py` contains persistence DTOs. A route must not accept a protocol-only capability merely because the protocol can represent it.
 
 Errors follow a Problem Details-like shape with `code`, `message`, `request_id`, and optional safe-to-display `details`. Provider secrets, full stack traces, and unfiltered tool output are never returned to clients.
 
@@ -248,7 +250,7 @@ Tool inputs and outputs use Pydantic schemas. Every external call has connection
 ### Observability and quality
 
 - Every log line includes `request_id`, redacted `user_id`, `conversation_id`, `thread_id`, `run_id`, and trace ID.
-- Core metrics: request volume, latency, error rate, time to first token, completion time, tool success rate and latency, model usage and cost, rate-limit events, and graph interruption/resume events.
+- Core metrics: request volume, latency, error rate, time to first token, completion time, model usage and cost, rate-limit events, and stream completion.
 - Retain a trace for every Agent run. LangSmith is recommended for the first release. If the team already uses Langfuse, use an observability adapter so business code remains vendor-neutral.
 - Maintain Chinese travel-query evaluation data under `evals/`, covering weather consistency, source citations, constraint adherence, clarification quality, tool-failure recovery, and safety boundaries.
 

@@ -1,5 +1,7 @@
 # Travel Assistant Backend Iteration Plan
 
+[中文版本](todo-plan.zh-CN.md)
+
 **Status:** P0 and P1 complete; P2 single-Agent conversation foundation in progress
 **Related design:** [Travel Assistant Backend Architecture Design](architecture-design.md)  
 **Planning approach:** Deliver milestones with explicit acceptance criteria. Expand scope only after the preceding milestone is complete.
@@ -61,7 +63,7 @@ flowchart LR
 - [x] Compile exactly `START → agent → END`. The Agent receives a system prompt and checkpointed history, then appends one reply. This remains the sole graph topology for P2–P5.
 - [x] Build an LLM Service for OpenAI-compatible configuration, model registration, call timeouts, retries, and configurable fallback models.
 - [x] Integrate LangGraph `PostgresSaver`; every graph call includes the conversation `thread_id`. Add recovery tests across service restarts.
-- [x] Implement SSE for `POST /messages` with `status`, `token`, `final`, and `error` events from the single Agent.
+- [x] Implement Responses-style SSE for `POST /messages`: lifecycle, output-item, text-delta, completion, and error events from the single Agent.
 - [ ] Add single-Agent unit and integration tests for normal queries, empty model output, provider failure, idempotent replay, and conversation recovery.
 - [ ] Define the system prompt versioning, history-window budget, and safe response policy for the single Agent.
 
@@ -114,7 +116,7 @@ flowchart LR
 ## Decisions to confirm before P1
 
 - [x] First identity model: multiple local email/password accounts with JWT; no anonymous conversations or API-key credentials.
-- [x] API compatibility target: OpenAI Chat Completions-inspired request/response and streaming semantics, not zero-change OpenAI SDK compatibility.
+- [x] API compatibility target: stable OpenAI Responses-inspired request/response and ordered streaming-event semantics, not zero-change OpenAI SDK compatibility.
 - [x] Conversation creation: the first chat request creates a conversation automatically; later requests send the returned `conversation_id`.
 - [x] Self-managed accounts: open registration with Argon2id password hashes, email login, JWT access tokens, and rotating refresh tokens. Email verification and password reset are deferred to P3.
 - [x] Token lifecycle: short-lived access JWTs, rotating refresh sessions, and server-side revocation state.

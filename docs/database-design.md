@@ -1,5 +1,7 @@
 # Travel Assistant Database Design
 
+[中文版本](database-design.zh-CN.md)
+
 **Status:** Multi-account SQLModel definitions and rebuildable initial Alembic baseline
 **Last updated:** 2026-08-11
 **Database:** PostgreSQL 16; MinIO stores attachment bytes; LangGraph owns its checkpoint tables
