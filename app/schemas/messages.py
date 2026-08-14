@@ -60,12 +60,13 @@ class MessageUpdate(BaseModel):
 
 
 class MessageSubmission(BaseModel):
-    """One new user message accepted by the initial non-streaming Agent endpoint."""
+    """One new user message accepted by the single-Agent endpoint."""
 
     model_config = ConfigDict(extra="forbid")
 
     content: str = Field(min_length=1, max_length=20_000)
     metadata: dict[str, str] = Field(default_factory=dict, max_length=20)
+    stream: bool = False
 
     @field_validator("content")
     @classmethod

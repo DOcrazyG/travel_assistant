@@ -66,13 +66,13 @@ sequenceDiagram
     C->>A: POST /api/v1/conversations/{id}/messages
     A->>A: Authenticate, rate-limit, validate request
     A->>D: Store user message / retrieve thread_id
-    A->>G: ainvoke(new message, thread_id, user context)
+    A->>G: ainvoke or astream(new message, thread_id, user context)
     G->>D: Restore checkpointed message history
     G->>G: Apply system prompt and call one LLM
     G->>D: Persist updated checkpoint
-    G-->>A: Assistant reply
+    G-->>A: Assistant reply or token deltas
     A->>D: Store assistant message and completed run
-    A-->>C: JSON completion
+    A-->>C: JSON completion or SSE status/token/final/error events
 ```
 
 ## 4. Technology choices
@@ -182,7 +182,7 @@ flowchart LR
 
 For every submitted user message, the Agent restores its `thread_id` history, prepends `TRAVEL_ASSISTANT_SYSTEM_PROMPT`, invokes the configured primary model (and optional fallback), then appends its reply to the checkpoint. The API service persists the same user/assistant transcript and run record outside the graph.
 
-There is intentionally no pre-validation, memory-loading node, `ToolNode`, router, `interrupt()`, or SSE node in this phase. The model may ask its own clarifying questions using the system prompt and conversation history.
+There is intentionally no pre-validation, memory-loading node, `ToolNode`, router, or `interrupt()` in this phase. SSE is an API presentation of token events from this same Agent node, not an additional graph node. The model may ask its own clarifying questions using the system prompt and conversation history.
 
 ### Single-Agent evolution rules
 

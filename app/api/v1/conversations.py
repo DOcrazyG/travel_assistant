@@ -1,10 +1,12 @@
 """Authenticated REST endpoints for conversation creation and history retrieval."""
 
-from collections.abc import Sequence
-from typing import Annotated
+import json
+from collections.abc import AsyncIterator, Sequence
+from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
+from fastapi.responses import StreamingResponse
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.errors import APIError
@@ -52,6 +54,22 @@ def _replay_failure(reservation: IdempotencyReservation) -> None:
         str(snapshot.get("code", "internal_error")),
         str(snapshot.get("message", "An unexpected error occurred.")),
         details=snapshot.get("details"),
+    )
+
+
+def _sse_event(event: str, data: dict[str, Any]) -> str:
+    """Serialize one safe Server-Sent Event payload."""
+
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+def _sse_response(events: AsyncIterator[str]) -> StreamingResponse:
+    """Return an unbuffered event stream with browser-safe response headers."""
+
+    return StreamingResponse(
+        events,
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
@@ -198,8 +216,8 @@ async def submit_message(
     ],
     idempotency_service: Annotated[IdempotencyService, Depends(get_idempotency_service)],
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
-) -> MessageSubmissionResponse:
-    """Run one idempotent, non-streaming Agent turn in an owned conversation."""
+) -> MessageSubmissionResponse | StreamingResponse:
+    """Run one idempotent Agent turn as JSON or an SSE token stream."""
 
     conversation = await _crud(session, current_user).require(conversation_id)
     _bind_conversation_context(request, conversation)
@@ -214,7 +232,91 @@ async def submit_message(
     )
     if reservation.replay:
         _replay_failure(reservation)
-        return MessageSubmissionResponse.model_validate(reservation.record.response_snapshot)
+        replay = MessageSubmissionResponse.model_validate(reservation.record.response_snapshot)
+        if payload.stream:
+
+            async def replay_events() -> AsyncIterator[str]:
+                yield _sse_event(
+                    "final",
+                    {
+                        "request_id": str(getattr(request.state, "request_id", "")),
+                        **replay.model_dump(mode="json"),
+                    },
+                )
+
+            return _sse_response(replay_events())
+        return replay
+
+    if payload.stream:
+
+        async def stream_events() -> AsyncIterator[str]:
+            request_id = str(getattr(request.state, "request_id", ""))
+            try:
+                async for event in execution_service.stream(
+                    conversation=conversation,
+                    user_id=current_user.id,
+                    content=payload.content,
+                ):
+                    common = {
+                        "request_id": request_id,
+                        "conversation_id": str(conversation.id),
+                        "run_id": str(event.run.id),
+                    }
+                    if event.event == "status":
+                        yield _sse_event("status", {**common, "status": "running"})
+                    elif event.event == "token" and event.delta is not None:
+                        yield _sse_event("token", {**common, "delta": event.delta})
+                    elif event.event == "final" and event.result is not None:
+                        response = MessageSubmissionResponse(
+                            conversation_id=conversation.id,
+                            run_id=event.result.run.id,
+                            message=MessageRead.model_validate(event.result.message),
+                        )
+                        await idempotency_service.complete(
+                            reservation.record,
+                            response_status=status.HTTP_200_OK,
+                            response_snapshot=response.model_dump(mode="json"),
+                            conversation_id=conversation.id,
+                            agent_run_id=event.result.run.id,
+                        )
+                        yield _sse_event("final", {**common, **response.model_dump(mode="json")})
+            except APIError as error:
+                await idempotency_service.fail(
+                    reservation.record,
+                    response_status=error.status_code,
+                    response_snapshot={
+                        "code": error.code,
+                        "message": error.message,
+                        "details": error.details,
+                    },
+                )
+                yield _sse_event(
+                    "error",
+                    {
+                        "request_id": request_id,
+                        "code": error.code,
+                        "message": error.message,
+                    },
+                )
+            except Exception:
+                await idempotency_service.fail(
+                    reservation.record,
+                    response_status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    response_snapshot={
+                        "code": "internal_error",
+                        "message": "An unexpected error occurred.",
+                    },
+                )
+                yield _sse_event(
+                    "error",
+                    {
+                        "request_id": request_id,
+                        "code": "internal_error",
+                        "message": "An unexpected error occurred.",
+                    },
+                )
+
+        return _sse_response(stream_events())
 
     try:
         result = await execution_service.execute(

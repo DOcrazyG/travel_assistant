@@ -61,7 +61,7 @@ flowchart LR
 - [x] Compile exactly `START → agent → END`. The Agent receives a system prompt and checkpointed history, then appends one reply. This remains the sole graph topology for P2–P5.
 - [x] Build an LLM Service for OpenAI-compatible configuration, model registration, call timeouts, retries, and configurable fallback models.
 - [x] Integrate LangGraph `PostgresSaver`; every graph call includes the conversation `thread_id`. Add recovery tests across service restarts.
-- [ ] Implement SSE for `POST /messages` with `status`, `token`, `final-response`, and `error` events from the single Agent.
+- [x] Implement SSE for `POST /messages` with `status`, `token`, `final`, and `error` events from the single Agent.
 - [ ] Add single-Agent unit and integration tests for normal queries, empty model output, provider failure, idempotent replay, and conversation recovery.
 - [ ] Define the system prompt versioning, history-window budget, and safe response policy for the single Agent.
 

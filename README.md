@@ -35,8 +35,9 @@ latest migration before using these protected endpoints:
 
 The first P2 Agent endpoint is available at
 `POST /api/v1/conversations/{conversation_id}/messages`. It accepts one new
-user message with a required `Idempotency-Key` and returns a non-streaming
-assistant completion. Configure `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and
+user message with a required `Idempotency-Key` and returns a durable assistant
+completion. Set `stream: true` in the JSON body to receive `status`, `token`,
+`final`, and `error` SSE events instead. Configure `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and
 `DEFAULT_LLM_MODEL` before submitting messages. Optionally configure
 `FALLBACK_LLM_MODEL` on the same OpenAI-compatible endpoint; it is attempted
 only if the primary model call fails. The initial Agent uses a single system
@@ -83,7 +84,8 @@ make smoke-admin         # Log in with .env bootstrap-admin credentials and chat
 
 Before `make smoke-admin`, start the API and set `BOOTSTRAP_ADMIN_EMAIL` and
 `BOOTSTRAP_ADMIN_PASSWORD` in `.env`. The script creates a new conversation,
-then reads terminal messages until `/exit` or Ctrl-D. Use
+then reads terminal messages until `/exit` or Ctrl-D; assistant tokens are
+rendered from the SSE stream as they arrive. Use
 `uv run python scripts/admin_conversation_smoke.py --base-url http://host:port`
 for a non-default API address.
 

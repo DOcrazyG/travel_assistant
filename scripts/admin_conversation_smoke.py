@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Iterator
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -58,6 +59,55 @@ def _request(
     if not isinstance(decoded, dict):
         raise APIRequestError(f"{method} {path} returned an unexpected JSON payload.")
     return decoded
+
+
+def _stream_request(
+    base_url: str,
+    method: str,
+    path: str,
+    *,
+    body: dict[str, Any],
+    headers: dict[str, str],
+    timeout_seconds: float = 90,
+) -> Iterator[tuple[str, dict[str, Any]]]:
+    """Yield named JSON SSE events with no external client dependency."""
+
+    request = Request(
+        f"{base_url.rstrip('/')}{path}",
+        data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "Accept": "text/event-stream",
+            "Content-Type": "application/json",
+            **headers,
+        },
+        method=method,
+    )
+    try:
+        with urlopen(request, timeout=timeout_seconds) as response:  # noqa: S310 -- CLI target is explicit.
+            event_name = "message"
+            data_lines: list[str] = []
+            for raw_line in response:
+                line = raw_line.decode("utf-8").rstrip("\r\n")
+                if not line:
+                    if data_lines:
+                        try:
+                            payload = json.loads("\n".join(data_lines))
+                        except json.JSONDecodeError as error:
+                            raise APIRequestError("SSE event contained invalid JSON.") from error
+                        if not isinstance(payload, dict):
+                            raise APIRequestError("SSE event contained an unexpected payload.")
+                        yield event_name, payload
+                    event_name = "message"
+                    data_lines = []
+                elif line.startswith("event:"):
+                    event_name = line.removeprefix("event:").strip()
+                elif line.startswith("data:"):
+                    data_lines.append(line.removeprefix("data:").strip())
+    except HTTPError as error:
+        payload = error.read().decode("utf-8", errors="replace")
+        raise APIRequestError(f"{method} {path} failed ({error.code}): {payload}") from error
+    except URLError as error:
+        raise APIRequestError(f"Cannot reach the API at {base_url}: {error.reason}") from error
 
 
 def _admin_credentials(settings: Settings) -> tuple[str, str]:
@@ -116,22 +166,39 @@ def run(base_url: str) -> int:
         if not user_input:
             continue
 
-        completion = _request(
+        received_tokens = False
+        for event, payload in _stream_request(
             base_url,
             "POST",
             f"/api/v1/conversations/{conversation_id}/messages",
-            body={"content": user_input},
+            body={"content": user_input, "stream": True},
             headers={**authorization, "Idempotency-Key": str(uuid4())},
-        )
-        message = completion.get("message")
-        if not isinstance(message, dict):
-            raise APIRequestError("Message submission succeeded without an assistant message.")
-        answer = message.get("rendered_text")
-        run_id = completion.get("run_id", "unknown")
-        rendered_answer = (
-            answer if isinstance(answer, str) else json.dumps(message, ensure_ascii=False)
-        )
-        print(f"assistant [{run_id}]> {rendered_answer}")
+        ):
+            if event == "token":
+                delta = payload.get("delta")
+                if isinstance(delta, str):
+                    if not received_tokens:
+                        prefix = f"assistant [{payload.get('run_id', 'unknown')}]> "
+                        print(prefix, end="", flush=True)
+                        received_tokens = True
+                    print(delta, end="", flush=True)
+            elif event == "final":
+                if received_tokens:
+                    print()
+                    continue
+                message = payload.get("message")
+                if not isinstance(message, dict):
+                    raise APIRequestError("SSE final event lacked an assistant message.")
+                answer = message.get("rendered_text")
+                rendered_answer = (
+                    answer if isinstance(answer, str) else json.dumps(message, ensure_ascii=False)
+                )
+                print(f"assistant [{payload.get('run_id', 'unknown')}]> {rendered_answer}")
+            elif event == "error":
+                raise APIRequestError(
+                    f"Stream failed: {payload.get('code', 'unknown_error')} — "
+                    f"{payload.get('message', 'Unknown error.')}"
+                )
     return 0
 
 

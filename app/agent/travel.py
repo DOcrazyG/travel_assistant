@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import operator
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Annotated, Literal, Protocol
 from uuid import UUID
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.runtime import Runtime
@@ -23,6 +25,11 @@ class TravelChatModel(Protocol):
 
         ...
 
+    def astream(self, messages: list[BaseMessage]) -> AsyncIterator[BaseMessage]:
+        """Yield model response chunks for one supplied canonical message history."""
+
+        ...
+
 
 @dataclass(frozen=True)
 class TravelAgentContext:
@@ -31,6 +38,7 @@ class TravelAgentContext:
     user_id: UUID
     conversation_id: UUID
     llm: TravelChatModel
+    stream_tokens: bool = False
 
 
 class GraphMessage(TypedDict):
@@ -80,8 +88,18 @@ async def agent(state: TravelAgentState, runtime: Runtime[TravelAgentContext]) -
             history.append(HumanMessage(content=message["content"]))
         else:
             history.append(AIMessage(content=message["content"]))
-    response = await runtime.context.llm.ainvoke(history)
-    answer = _text(response)
+    if runtime.context.stream_tokens:
+        writer = get_stream_writer()
+        chunks: list[str] = []
+        async for response_chunk in runtime.context.llm.astream(history):
+            delta = _text(response_chunk)
+            if delta:
+                chunks.append(delta)
+                writer({"event": "token", "delta": delta})
+        answer = "".join(chunks)
+    else:
+        response = await runtime.context.llm.ainvoke(history)
+        answer = _text(response)
     if not answer:
         answer = "我暂时无法生成可用回复，请稍后重试。"
     return {

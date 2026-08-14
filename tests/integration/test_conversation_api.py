@@ -1,12 +1,12 @@
 """End-to-end PostgreSQL tests for authenticated conversation API boundaries."""
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 from uuid import uuid4
 
 import httpx
 import pytest
-from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
 
 from app.agent.travel import TRAVEL_ASSISTANT_SYSTEM_PROMPT
 from app.core.config import Settings
@@ -69,6 +69,11 @@ class FakeLLM:
     async def ainvoke(self, messages: list[BaseMessage]) -> BaseMessage:
         self.calls.append(messages)
         return AIMessage(content="这是持久化的助手回复。")
+
+    async def astream(self, messages: list[BaseMessage]) -> AsyncIterator[BaseMessage]:
+        self.calls.append(messages)
+        yield AIMessageChunk(content="这是")
+        yield AIMessageChunk(content="流式助手回复。")
 
 
 class UnavailableLLM:
@@ -238,3 +243,36 @@ async def test_failed_completion_is_replayed_as_the_same_safe_error(
     assert first.json()["code"] == "llm_unavailable"
     assert replay.status_code == 503
     assert replay.json()["code"] == "llm_unavailable"
+
+
+@pytest.mark.anyio
+async def test_message_submission_streams_tokens_and_persists_the_final_reply(
+    integration_settings: Settings,
+) -> None:
+    async with api_client(integration_settings, llm=FakeLLM()) as client:
+        token = await access_token(client)
+        created = await client.post("/api/v1/conversations", headers=bearer(token), json={})
+        assert created.status_code == 201, created.text
+        conversation_id = created.json()["id"]
+        response = await client.post(
+            f"/api/v1/conversations/{conversation_id}/messages",
+            headers={**bearer(token), "Idempotency-Key": "stream-completion-001"},
+            json={"content": "请推荐上海旅行", "stream": True},
+        )
+        history = await client.get(
+            f"/api/v1/conversations/{conversation_id}/messages",
+            headers=bearer(token),
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "event: status" in response.text
+    assert "event: token" in response.text
+    assert '"delta": "这是"' in response.text
+    assert '"delta": "流式助手回复。"' in response.text
+    assert "event: final" in response.text
+    assert history.status_code == 200
+    assert [message["rendered_text"] for message in history.json()["data"]] == [
+        "请推荐上海旅行",
+        "这是流式助手回复。",
+    ]

@@ -1,9 +1,10 @@
 """Unit tests for the durable, single-node travel Agent."""
 
+from collections.abc import AsyncIterator
 from uuid import uuid4
 
 import pytest
-from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import InMemorySaver
 
@@ -23,6 +24,11 @@ class FakeLLM:
     async def ainvoke(self, messages: list[BaseMessage]) -> BaseMessage:
         self.calls.append(messages)
         return AIMessage(content="上海周末可以先游览外滩，再根据天气调整行程。")
+
+    async def astream(self, messages: list[BaseMessage]) -> AsyncIterator[BaseMessage]:
+        self.calls.append(messages)
+        yield AIMessageChunk(content="上海周末可以先游览")
+        yield AIMessageChunk(content="外滩，再根据天气调整行程。")
 
 
 @pytest.mark.anyio
@@ -76,3 +82,33 @@ async def test_complete_request_uses_llm_and_persists_the_latest_turn_in_one_thr
         "role": "assistant",
         "content": state["final_answer"],
     }
+
+
+@pytest.mark.anyio
+async def test_agent_streams_token_deltas_and_persists_the_complete_reply() -> None:
+    llm = FakeLLM()
+    graph = create_travel_agent_graph(InMemorySaver())
+    context = TravelAgentContext(
+        user_id=uuid4(),
+        conversation_id=uuid4(),
+        llm=llm,
+        stream_tokens=True,
+    )
+    config: RunnableConfig = {"configurable": {"thread_id": "stream-thread"}}
+
+    events = [
+        event
+        async for event in graph.astream(
+            {"messages": [{"role": "user", "content": "请推荐上海旅行"}]},
+            config,
+            context=context,
+            stream_mode="custom",
+        )
+    ]
+
+    assert events == [
+        {"event": "token", "delta": "上海周末可以先游览"},
+        {"event": "token", "delta": "外滩，再根据天气调整行程。"},
+    ]
+    checkpoint = await graph.aget_state(config)
+    assert checkpoint.values["final_answer"] == "上海周末可以先游览外滩，再根据天气调整行程。"
