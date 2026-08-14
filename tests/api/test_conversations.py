@@ -10,11 +10,17 @@ from app.core.crud import PageResult
 from app.dependencies.auth import get_current_user
 from app.dependencies.database import get_session
 from app.dependencies.rate_limit import limit_conversation_write
+from app.dependencies.services import (
+    get_conversation_execution_service,
+    get_idempotency_service,
+)
 from app.main import create_app
+from app.models.agent_runs import AgentRun
 from app.models.conversations import Conversation
 from app.models.messages import Message
 from app.models.users import User
 from app.schemas.conversations import ConversationCreate
+from app.services.conversation_execution import ConversationExecutionResult
 
 
 class ConversationCRUDStub:
@@ -54,6 +60,38 @@ class MessageCRUDStub:
 
     async def get_page(self, *, offset: int, limit: int) -> PageResult[Message]:
         return PageResult(items=self.messages, next_offset=None)
+
+
+class ExecutionServiceStub:
+    async def execute(
+        self,
+        *,
+        conversation: Conversation,
+        user_id: object,
+        content: str,
+    ) -> ConversationExecutionResult:
+        run = AgentRun(conversation_id=conversation.id, status="completed")
+        message = Message(
+            conversation_id=conversation.id,
+            sequence=conversation.latest_message_sequence + 1,
+            role="assistant",
+            content=[{"type": "text", "text": f"回复：{content}"}],
+            rendered_text=f"回复：{content}",
+            agent_run_id=run.id,
+        )
+        return ConversationExecutionResult(run=run, message=message)
+
+
+class IdempotencyServiceStub:
+    async def begin(self, **_: object) -> object:
+        class Reservation:
+            replay = False
+            record = object()
+
+        return Reservation()
+
+    async def complete(self, _: object, **__: object) -> None:
+        return None
 
 
 def _user() -> User:
@@ -154,3 +192,51 @@ async def test_conversation_request_validation_uses_the_shared_safe_error_shape(
     assert response.json()["message"] == "The request is invalid."
     assert response.json()["request_id"]
     assert response.headers["X-Request-ID"] == response.json()["request_id"]
+
+
+@pytest.mark.anyio
+async def test_message_submission_requires_idempotency_and_returns_a_durable_completion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = create_app()
+    user = _user()
+    service = ConversationCRUDStub(object(), user.id)
+
+    async def current_user_override() -> User:
+        return user
+
+    async def session_override() -> object:
+        return object()
+
+    async def rate_limit_override() -> None:
+        return None
+
+    monkeypatch.setattr(conversations_api, "ConversationCRUD", lambda *_: service)
+    app.dependency_overrides[get_current_user] = current_user_override
+    app.dependency_overrides[get_session] = session_override
+    app.dependency_overrides[limit_conversation_write] = rate_limit_override
+
+    async def execution_service_override() -> ExecutionServiceStub:
+        return ExecutionServiceStub()
+
+    async def idempotency_service_override() -> IdempotencyServiceStub:
+        return IdempotencyServiceStub()
+
+    app.dependency_overrides[get_conversation_execution_service] = execution_service_override
+    app.dependency_overrides[get_idempotency_service] = idempotency_service_override
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    path = f"/api/v1/conversations/{service.conversation.id}/messages"
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        missing_key = await client.post(path, json={"content": "你好"})
+        accepted = await client.post(
+            path,
+            json={"content": "你好"},
+            headers={"Idempotency-Key": "message-001"},
+        )
+
+    assert missing_key.status_code == 400
+    assert missing_key.json()["code"] == "missing_idempotency_key"
+    assert accepted.status_code == 200
+    assert accepted.json()["conversation_id"] == str(service.conversation.id)
+    assert accepted.json()["message"]["rendered_text"] == "回复：你好"
+    assert "post" in app.openapi()["paths"]["/api/v1/conversations/{conversation_id}/messages"]

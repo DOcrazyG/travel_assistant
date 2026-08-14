@@ -4,13 +4,18 @@ from collections.abc import Sequence
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request, Response, status
+from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.core.errors import APIError
 from app.core.logging import bind_context
 from app.dependencies.auth import get_current_user
 from app.dependencies.database import get_session
 from app.dependencies.rate_limit import limit_conversation_write
+from app.dependencies.services import (
+    get_conversation_execution_service,
+    get_idempotency_service,
+)
 from app.models.conversations import Conversation
 from app.models.messages import Message
 from app.models.users import User
@@ -20,10 +25,17 @@ from app.schemas.conversations import (
     ConversationPage,
     ConversationRead,
 )
-from app.schemas.messages import MessagePage, MessageRead
+from app.schemas.messages import (
+    MessagePage,
+    MessageRead,
+    MessageSubmission,
+    MessageSubmissionResponse,
+)
 from app.schemas.pagination import OffsetPage
+from app.services.conversation_execution import ConversationExecutionService
 from app.services.crud.conversations import ConversationCRUD
 from app.services.crud.messages import MessageCRUD
+from app.services.idempotency import IdempotencyService
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
@@ -152,6 +164,60 @@ async def list_messages(
         limit=limit,
         next_offset=page.next_offset,
     )
+
+
+@router.post(
+    "/{conversation_id}/messages",
+    response_model=MessageSubmissionResponse,
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(limit_conversation_write)],
+)
+async def submit_message(
+    conversation_id: UUID,
+    payload: MessageSubmission,
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    execution_service: Annotated[
+        ConversationExecutionService, Depends(get_conversation_execution_service)
+    ],
+    idempotency_service: Annotated[IdempotencyService, Depends(get_idempotency_service)],
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> MessageSubmissionResponse:
+    """Run one idempotent, non-streaming Agent turn in an owned conversation."""
+
+    conversation = await _crud(session, current_user).require(conversation_id)
+    _bind_conversation_context(request, conversation)
+    if idempotency_key is None:
+        raise APIError(400, "missing_idempotency_key", "Idempotency-Key is required.")
+    reservation = await idempotency_service.begin(
+        user_id=current_user.id,
+        http_method=request.method,
+        route=request.url.path,
+        idempotency_key=idempotency_key,
+        payload=payload.model_dump(mode="json"),
+    )
+    if reservation.replay:
+        return MessageSubmissionResponse.model_validate(reservation.record.response_snapshot)
+
+    result = await execution_service.execute(
+        conversation=conversation,
+        user_id=current_user.id,
+        content=payload.content,
+    )
+    response = MessageSubmissionResponse(
+        conversation_id=conversation.id,
+        run_id=result.run.id,
+        message=MessageRead.model_validate(result.message),
+    )
+    await idempotency_service.complete(
+        reservation.record,
+        response_status=status.HTTP_200_OK,
+        response_snapshot=response.model_dump(mode="json"),
+        conversation_id=conversation.id,
+        agent_run_id=result.run.id,
+    )
+    return response
 
 
 @router.delete(

@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import httpx
 import pytest
+from langchain_core.messages import AIMessage, BaseMessage
 
 from app.core.config import Settings
 from app.main import create_app
@@ -21,10 +22,16 @@ def anyio_backend() -> str:
 
 
 @asynccontextmanager
-async def api_client(settings: Settings) -> AsyncGenerator[httpx.AsyncClient, None]:
+async def api_client(
+    settings: Settings,
+    *,
+    llm: object | None = None,
+) -> AsyncGenerator[httpx.AsyncClient, None]:
     """Run one application lifespan against the migrated integration database."""
 
     app = create_app(settings)
+    if llm is not None:
+        app.state.travel_llm = llm
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
         async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
@@ -49,6 +56,13 @@ def bearer(token: str) -> dict[str, str]:
     """Build authenticated request headers."""
 
     return {"Authorization": f"Bearer {token}"}
+
+
+class FakeLLM:
+    """Avoid external provider calls while testing the durable message boundary."""
+
+    async def ainvoke(self, _: list[BaseMessage]) -> BaseMessage:
+        return AIMessage(content="这是持久化的助手回复。")
 
 
 @pytest.mark.anyio
@@ -149,3 +163,30 @@ async def test_conversation_survives_an_application_restart(
 
     assert response.status_code == 200
     assert response.json()["title"] == "Persistent conversation"
+
+
+@pytest.mark.anyio
+async def test_message_completion_and_history_survive_an_application_restart(
+    integration_settings: Settings,
+) -> None:
+    async with api_client(integration_settings, llm=FakeLLM()) as client:
+        token = await access_token(client)
+        created = await client.post("/api/v1/conversations", headers=bearer(token), json={})
+        assert created.status_code == 201, created.text
+        conversation_id = created.json()["id"]
+        completion = await client.post(
+            f"/api/v1/conversations/{conversation_id}/messages",
+            headers={**bearer(token), "Idempotency-Key": "restart-completion-001"},
+            json={"content": "你好，请推荐上海旅行"},
+        )
+        assert completion.status_code == 200, completion.text
+        assert completion.json()["message"]["rendered_text"] == "这是持久化的助手回复。"
+
+    async with api_client(integration_settings, llm=FakeLLM()) as restarted_client:
+        history = await restarted_client.get(
+            f"/api/v1/conversations/{conversation_id}/messages",
+            headers=bearer(token),
+        )
+
+    assert history.status_code == 200
+    assert [message["role"] for message in history.json()["data"]] == ["user", "assistant"]
