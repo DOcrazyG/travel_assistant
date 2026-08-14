@@ -21,6 +21,19 @@ def create_database_url(settings: Settings, database: str | None = None) -> URL:
     )
 
 
+def create_checkpoint_database_url(settings: Settings) -> str:
+    """Build the psycopg connection string required by LangGraph's async saver."""
+
+    return URL.create(
+        "postgresql",
+        username=settings.postgres_user,
+        password=settings.postgres_password,
+        host=settings.postgres_host,
+        port=settings.postgres_port,
+        database=settings.postgres_database,
+    ).render_as_string(hide_password=False)
+
+
 def ensure_database_exists(settings: Settings) -> None:
     """Create the configured application database when the PostgreSQL role permits it."""
 

@@ -151,11 +151,25 @@ def test_lifespan_verifies_and_disposes_the_database_engine(
         nonlocal administrator_checked
         administrator_checked = True
 
+    class FakeCheckpointerContext:
+        async def __aenter__(self) -> object:
+            return object()
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+    class FakeAsyncPostgresSaver:
+        @staticmethod
+        def from_conn_string(_: str) -> FakeCheckpointerContext:
+            return FakeCheckpointerContext()
+
     monkeypatch.setattr(main_module, "create_database_engine", create_engine)
     monkeypatch.setattr(main_module, "check_database_connection", check_connection)
     monkeypatch.setattr(main_module, "create_session_factory", lambda _: FakeSessionContext)
     monkeypatch.setattr(main_module, "ensure_database_exists", ensure_database)
     monkeypatch.setattr(main_module, "ensure_bootstrap_admin", ensure_administrator)
+    monkeypatch.setattr(main_module, "AsyncPostgresSaver", FakeAsyncPostgresSaver)
+    monkeypatch.setattr(main_module, "create_travel_agent_graph", lambda _: object())
     application = create_app(Settings(environment="test"))
 
     async def manage_lifespan() -> None:

@@ -1,5 +1,6 @@
 """PostgreSQL integration-test fixtures with an isolated, disposable database."""
 
+import asyncio
 import os
 from collections.abc import Generator
 from pathlib import Path
@@ -7,12 +8,17 @@ from secrets import token_hex
 
 import pytest
 from alembic.config import Config
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from pydantic import SecretStr
 from sqlalchemy import create_engine, text
 
 from alembic import command
 from app.core.config import Settings
-from app.core.database import create_database_url, ensure_database_exists
+from app.core.database import (
+    create_checkpoint_database_url,
+    create_database_url,
+    ensure_database_exists,
+)
 
 if os.getenv("RUN_POSTGRES_INTEGRATION") != "1":
     pytest.skip(
@@ -78,6 +84,16 @@ def migrated_test_database(integration_settings: Settings) -> Generator[None, No
     ).render_as_string(hide_password=False)
     try:
         command.upgrade(alembic_config, "head")
+        asyncio.run(_setup_langgraph_checkpoints(integration_settings))
         yield
     finally:
         _drop_test_database(integration_settings)
+
+
+async def _setup_langgraph_checkpoints(settings: Settings) -> None:
+    """Provision the dependency-owned checkpoint schema in this disposable database."""
+
+    async with AsyncPostgresSaver.from_conn_string(
+        create_checkpoint_database_url(settings)
+    ) as checkpointer:
+        await checkpointer.setup()

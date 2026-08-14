@@ -47,6 +47,7 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --all-groups --locked
+      - run: uv run python scripts/setup_langgraph_checkpoints.py
       - run: uv run ruff check .
       - run: uv run pyright
       - run: uv run pytest

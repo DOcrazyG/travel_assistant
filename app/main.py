@@ -8,13 +8,15 @@ import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.exc import SQLAlchemyError
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from starlette.types import ExceptionHandler
 
+from app.agent.travel import create_travel_agent_graph
 from app.api.v1.router import api_router
 from app.core.config import Settings, get_settings
 from app.core.database import (
     check_database_connection,
+    create_checkpoint_database_url,
     create_database_engine,
     create_session_factory,
     ensure_database_exists,
@@ -30,31 +32,39 @@ from app.core.logging import configure_logging
 from app.core.middleware import LoggingContextMiddleware, RequestContextMiddleware
 from app.core.rate_limit import create_rate_limiter
 from app.services.auth import ensure_bootstrap_admin
+from app.services.llm import OpenAICompatibleLLM
 
 
 @asynccontextmanager
 async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
-    """Create, verify, and dispose of the PostgreSQL connection pool."""
+    """Create, verify, and dispose of API and graph persistence resources."""
 
     settings: Settings = application.state.settings
     ensure_database_exists(settings)
     engine = create_database_engine(settings)
+    rate_limiter = None
+    checkpointer_context = None
     try:
         await check_database_connection(engine)
-    except SQLAlchemyError:
-        await engine.dispose()
-        raise
-
-    application.state.database_engine = engine
-    application.state.session_factory = create_session_factory(engine)
-    rate_limiter = await create_rate_limiter(settings)
-    application.state.rate_limiter = rate_limiter
-    try:
+        application.state.database_engine = engine
+        application.state.session_factory = create_session_factory(engine)
+        rate_limiter = await create_rate_limiter(settings)
+        application.state.rate_limiter = rate_limiter
+        checkpointer_context = AsyncPostgresSaver.from_conn_string(
+            create_checkpoint_database_url(settings)
+        )
+        checkpointer = await checkpointer_context.__aenter__()
+        application.state.travel_agent_graph = create_travel_agent_graph(checkpointer)
+        if not hasattr(application.state, "travel_llm"):
+            application.state.travel_llm = OpenAICompatibleLLM(settings)
         async with application.state.session_factory() as session:
             await ensure_bootstrap_admin(session, settings)
         yield
     finally:
-        await rate_limiter.close()
+        if checkpointer_context is not None:
+            await checkpointer_context.__aexit__(None, None, None)
+        if rate_limiter is not None:
+            await rate_limiter.close()
         await engine.dispose()
 
 
