@@ -58,7 +58,7 @@ flowchart LR
 **Goal:** Implement a recoverable graph that replaces a manually managed Agent loop.
 
 - [ ] Define `TravelAgentState`, runtime context, and typed node input/output. Add reducers for messages, tool results, and citations.
-- [ ] Assemble `validate → load_memory → agent ↔ tools → compose → persist`. P2.0 has state/context, append-only message history, and a checkpointed non-streaming `validate → load_memory → agent → compose → persist` execution boundary; tools remain pending.
+- [ ] Assemble `validate → load_memory → agent ↔ tools → compose → persist`. P2.0 currently uses one checkpointed, non-streaming Agent node with a system prompt and append-only message history. Validation, memory loading, tools, composition, and persistence subnodes are deferred until the simple conversation loop is validated.
 - [ ] Implement weather and attraction tools with LangGraph `ToolNode` and LangChain `@tool` functions.
 - [ ] Build an LLM Service for OpenAI-compatible configuration, model registration, call timeouts, retries, and configurable fallback models.
 - [ ] Integrate LangGraph `PostgresSaver`; every graph call includes the conversation `thread_id`. Add recovery tests across service restarts.

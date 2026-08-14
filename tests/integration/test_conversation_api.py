@@ -8,6 +8,7 @@ import httpx
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage
 
+from app.agent.travel import TRAVEL_ASSISTANT_SYSTEM_PROMPT
 from app.core.config import Settings
 from app.core.errors import APIError
 from app.main import create_app
@@ -190,7 +191,7 @@ async def test_message_completion_and_history_survive_an_application_restart(
         completion = await client.post(
             f"/api/v1/conversations/{conversation_id}/messages",
             headers={**bearer(token), "Idempotency-Key": "restart-completion-001"},
-            json={"content": "你好，请推荐上海2026年10月旅行"},
+            json={"content": "你好，请推荐上海旅行"},
         )
         assert completion.status_code == 200, completion.text
         assert completion.json()["message"]["rendered_text"] == "这是持久化的助手回复。"
@@ -211,10 +212,8 @@ async def test_message_completion_and_history_survive_an_application_restart(
     assert [message["role"] for message in history.json()["data"]] == ["user", "assistant"]
     assert follow_up.status_code == 200, follow_up.text
     assert [message.content for message in second_llm.calls[0]] == [
-        "You are a travel assistant. Respond in the user's language. "
-        "State uncertainty clearly and never invent sources, current weather, "
-        "opening hours, or booking availability.",
-        "你好，请推荐上海2026年10月旅行",
+        TRAVEL_ASSISTANT_SYSTEM_PROMPT,
+        "你好，请推荐上海旅行",
         "这是持久化的助手回复。",
         "预算控制在一千元以内",
     ]
@@ -230,7 +229,7 @@ async def test_failed_completion_is_replayed_as_the_same_safe_error(
         assert created.status_code == 201, created.text
         path = f"/api/v1/conversations/{created.json()['id']}/messages"
         headers = {**bearer(token), "Idempotency-Key": "unavailable-completion-001"}
-        payload = {"content": "请安排上海2026年10月旅行"}
+        payload = {"content": "请安排旅行"}
 
         first = await client.post(path, headers=headers, json=payload)
         replay = await client.post(path, headers=headers, json=payload)
