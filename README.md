@@ -33,6 +33,15 @@ latest migration before using these protected endpoints:
 - `POST /api/v1/auth/logout`
 - `GET /api/v1/auth/me`
 
+The first P2 Agent endpoint is available at
+`POST /api/v1/conversations/{conversation_id}/messages`. It accepts one new
+user message with a required `Idempotency-Key` and returns a non-streaming
+assistant completion. Configure `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and
+`DEFAULT_LLM_MODEL` before submitting requests that have sufficient travel
+constraints. Incomplete travel-planning requests ask for a destination and
+dates without invoking the model. SSE, provider tools, and `/resume` follow in
+later P2 increments.
+
 Login and refresh return a 15-minute bearer access token. Login also sets a rotating,
 30-day HttpOnly refresh-token cookie. Configure `CORS_ALLOWED_ORIGINS`, replace the two
 development-only keys in `.env.example`, and enable secure cookies before deploying.
@@ -45,6 +54,11 @@ never reset or replace that administrator's password.
 Application settings use standard names such as `APP_NAME`, `APP_DEBUG`, `POSTGRES_HOST`, `POSTGRES_DATABASE`, `POSTGRES_USER`, and `POSTGRES_PASSWORD`. `APP_DEBUG` is intentionally more specific than a generic `DEBUG` variable, preventing host-environment conflicts. LLM and LangSmith settings remain in `.env.example` for the future Agent implementation.
 
 Application tables are versioned by Alembic. Run `uv run alembic upgrade head` before starting a new environment; `./start_fastapi.sh` and `make run` do this automatically for local development. Create a reviewed migration after model changes with `make revision message="describe change"`. Production deployment runs migrations once as a separate release step, before starting API replicas.
+
+LangGraph checkpoint tables are dependency-owned rather than Alembic-managed.
+Run `make setup-checkpoints` once after application migrations for each
+database; `make migrate`, `make run`, and `./start_fastapi.sh` include this
+step for local development.
 
 PostgreSQL 16 (Alpine) and Valkey are supplied for local development through [docker-compose.yml](docker-compose.yml). Use `make up` and `make down` as shortcuts to start and stop local infrastructure. FastAPI verifies the PostgreSQL connection during startup and releases its pool during shutdown. Valkey is used for authentication and conversation-management rate limits, with an explicit in-memory fallback available only for local development and tests. Durable idempotency records use PostgreSQL and are scoped to the authenticated user. The project also includes LangGraph's PostgreSQL checkpoint integration for the forthcoming Agent runtime.
 
@@ -63,7 +77,14 @@ make check               # Run lint, type checking, and tests
 make migrate             # Upgrade application schema to the latest Alembic revision
 make revision message=... # Generate a candidate migration from SQLModel metadata
 make pre-commit-install  # Install local Git hooks
+make smoke-admin         # Log in with .env bootstrap-admin credentials and chat interactively
 ```
+
+Before `make smoke-admin`, start the API and set `BOOTSTRAP_ADMIN_EMAIL` and
+`BOOTSTRAP_ADMIN_PASSWORD` in `.env`. The script creates a new conversation,
+then reads terminal messages until `/exit` or Ctrl-D. Use
+`uv run python scripts/admin_conversation_smoke.py --base-url http://host:port`
+for a non-default API address.
 
 The PostgreSQL integration suite is skipped unless explicitly enabled. With local Compose
 PostgreSQL running, use `RUN_POSTGRES_INTEGRATION=1 uv run pytest tests/integration`.

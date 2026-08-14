@@ -1,6 +1,6 @@
 # Conversation API and Identity Contract
 
-**Status:** Approved design for P1; implementation pending
+**Status:** Approved contract; P1 foundation implemented and P2.0 non-streaming execution in progress
 **Last updated:** 2026-08-10  
 **Applies to:** Authenticated conversational calls, conversation ownership, and LangGraph state recovery
 

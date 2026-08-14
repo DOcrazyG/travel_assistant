@@ -1,4 +1,4 @@
-.PHONY: install format lint typecheck test check run migrate revision up down pre-commit-install
+.PHONY: install format lint typecheck test check run migrate setup-checkpoints smoke-admin revision up down pre-commit-install
 
 install:
 	uv sync --all-groups
@@ -18,11 +18,18 @@ test:
 check: lint typecheck test
 
 run:
-	uv run alembic upgrade head
+	$(MAKE) migrate
 	uv run uvicorn app.main:app --reload
 
 migrate:
 	uv run alembic upgrade head
+	$(MAKE) setup-checkpoints
+
+setup-checkpoints:
+	uv run python scripts/setup_langgraph_checkpoints.py
+
+smoke-admin:
+	uv run python scripts/admin_conversation_smoke.py
 
 revision:
 	uv run alembic revision --autogenerate -m "$(message)"

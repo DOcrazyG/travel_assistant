@@ -1,6 +1,6 @@
 # Travel Assistant Backend Iteration Plan
 
-**Status:** P0 complete; P1 database and authentication foundation in progress
+**Status:** P0 complete; P1 foundation complete; P2.0 non-streaming Agent loop in progress
 **Related design:** [Travel Assistant Backend Architecture Design](architecture-design.md)  
 **Planning approach:** Deliver milestones with explicit acceptance criteria. Expand scope only after the preceding milestone is complete.
 
@@ -58,7 +58,7 @@ flowchart LR
 **Goal:** Implement a recoverable graph that replaces a manually managed Agent loop.
 
 - [ ] Define `TravelAgentState`, runtime context, and typed node input/output. Add reducers for messages, tool results, and citations.
-- [ ] Assemble `validate → load_memory → agent ↔ tools → compose → persist`.
+- [ ] Assemble `validate → load_memory → agent ↔ tools → compose → persist`. P2.0 has the state/context and a checkpointed non-streaming `validate → load_memory → agent → compose → persist` execution boundary; tools and list reducers remain pending.
 - [ ] Implement weather and attraction tools with LangGraph `ToolNode` and LangChain `@tool` functions.
 - [ ] Build an LLM Service for OpenAI-compatible configuration, model registration, call timeouts, retries, and configurable fallback models.
 - [ ] Integrate LangGraph `PostgresSaver`; every graph call includes the conversation `thread_id`. Add recovery tests across service restarts.
