@@ -1,12 +1,12 @@
 # Travel Assistant Backend Architecture Design
 
-**Status:** Approved target architecture; P0 and database-migration foundation implemented
-**Last updated:** 2026-08-10
+**Status:** Approved target architecture; P2.0 single-Agent conversation loop implemented
+**Last updated:** 2026-08-14
 **Applies to:** Building a deployable, maintainable FastAPI and LangGraph service from the engineering baseline
 
 ## 1. Context and goals
 
-The repository now contains an engineering and authentication baseline. The target system is a locally authenticated multi-account travel-assistant backend with HTTP APIs, conversation state, controlled external tools, operational safeguards, and observability.
+The repository now contains an engineering and authentication baseline plus a durable, single-Agent conversation loop. The target system is a locally authenticated multi-account travel-assistant backend with HTTP APIs, conversation state, controlled external tools, operational safeguards, and observability.
 
 This design takes inspiration from [fastapi-langgraph-agent-production-ready-template](https://github.com/wassim249/fastapi-langgraph-agent-production-ready-template): an API layer, LangGraph orchestration, independent services, database migrations, caching, authentication, rate limiting, observability, and evaluation. The first product scope is travel advice and itinerary drafts. Booking, payments, and other irreversible travel decisions are explicitly excluded.
 
@@ -43,38 +43,36 @@ flowchart TB
     MW --> Chat[Conversation Service]
     Chat --> Graph[Travel LangGraph]
     Graph --> LLM[LLM Service\nRegistry · Timeout · Retry · Fallback]
-    Graph --> Tools[Travel Tools]
-    Tools --> Weather[Weather Provider]
-    Tools --> Search[Attraction / Destination Search]
-    Tools --> Maps[Route / Map Provider - later]
-    Graph --> Memory[Memory Service]
+    Chat --> Domain[Preference and Itinerary Services - P4]
     Chat --> DB[(PostgreSQL)]
+    Domain --> DB
     Graph --> DB
     MW --> Cache[(Redis / Valkey)]
     API --> Obs[Structured logs · Metrics · LLM tracing]
     Obs --> Monitor[Prometheus / Grafana / LangSmith]
 ```
 
-### Primary request flow
+The diagram above is the broad platform boundary. P2–P5 use one Travel Agent node as the only graph orchestration unit. Capabilities such as preferences, itineraries, observability, and release operations are added around that node through APIs and application services; they do not introduce graph routing, `ToolNode` loops, or multi-Agent delegation.
+
+### Current P2.0 request flow
 
 ```mermaid
 sequenceDiagram
     participant C as Client
     participant A as FastAPI
     participant G as Travel Graph
-    participant T as Travel Tools
     participant D as PostgreSQL
 
     C->>A: POST /api/v1/conversations/{id}/messages
     A->>A: Authenticate, rate-limit, validate request
     A->>D: Store user message / retrieve thread_id
-    A->>G: stream(message, thread_id, user context)
-    G->>D: Restore short-term context and confirmed preferences
-    G->>T: Call controlled weather and attraction tools
-    T-->>G: Structured results and sources
-    G-->>A: Progress, tokens, tool events, final response
-    A-->>C: SSE event stream
-    G->>D: Store messages, run trace, summary, and preference candidates
+    A->>G: ainvoke(new message, thread_id, user context)
+    G->>D: Restore checkpointed message history
+    G->>G: Apply system prompt and call one LLM
+    G->>D: Persist updated checkpoint
+    G-->>A: Assistant reply
+    A->>D: Store assistant message and completed run
+    A-->>C: JSON completion
 ```
 
 ## 4. Technology choices
@@ -82,8 +80,8 @@ sequenceDiagram
 | Area | Preferred choice | Responsibility |
 | --- | --- | --- |
 | API | FastAPI + Pydantic v2 | REST, SSE, OpenAPI, request and response validation |
-| Agent orchestration | LangGraph | Multi-turn state, conditional routing, tool loops, pause and resume |
-| LLM integration | `langchain-openai` in OpenAI-compatible mode | `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and `DEFAULT_LLM_MODEL` configuration |
+| Agent orchestration | LangGraph | One checkpointed `START → agent → END` topology for P2–P5; no routing or tool loop. |
+| LLM integration | `langchain-openai` in OpenAI-compatible mode | `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `DEFAULT_LLM_MODEL`, and optional `FALLBACK_LLM_MODEL` configuration |
 | System-management data | PostgreSQL 16 + SQLModel/SQLAlchemy + Alembic | Users, conversations, messages, runs, and migrations |
 | LangGraph persistence | `PostgresSaver` on PostgreSQL | Checkpoints by `thread_id`, recovery, and replay |
 | Cache and rate limiting | Redis or Valkey, with explicit in-memory development fallback | Hot-query cache, idempotency keys, and rate limits |
@@ -138,8 +136,9 @@ Exact versions are locked in `pyproject.toml` and `uv.lock`. New Agent code uses
 ```
 
 The repository currently includes the engineering baseline, SQLModel table metadata,
-and Alembic migration foundation. Prompts and tools must be implemented directly in
-the modules above; no previous prototype is migrated.
+Alembic migration foundation, a single-node graph in `app/agent/travel.py`, and an
+OpenAI-compatible LLM service in `app/services/llm.py`. Prompts and future tools are
+implemented directly under `app/`; no previous prototype is migrated.
 
 ## 6. Core domain and data model
 
@@ -164,46 +163,36 @@ The complete business schema, index strategy, retention, MinIO attachment bounda
 
 ## 7. LangGraph design
 
-### State model
+### Current single-Agent state model
 
-`TravelAgentState` contains at minimum:
+`TravelAgentState` currently contains only:
 
-- `messages`: a reducer-backed message sequence;
-- `user_id`, `conversation_id`, and `thread_id`: execution ownership;
-- `request_context`: language, timezone, client capabilities, and current date;
-- `travel_constraints`: structured destination, dates, budget, companions, and interests;
-- `retrieved_preferences`: read-only confirmed preferences;
-- `tool_results`, `citations`, and `warnings`: reducer-backed accumulated results;
-- `plan`, `final_answer`, `requires_confirmation`, and `run_status`: current outcome and control fields.
+- `messages`: a reducer-backed sequence of serializable `user` and `assistant` messages;
+- `final_answer`: the newest assistant text returned to the API layer.
 
-Nodes return partial updates and never mutate the entire state in place. List fields written by parallel nodes require reducers so results are not overwritten by the last writer.
+`user_id`, `conversation_id`, and the LLM client are request-scoped `TravelAgentContext`, not checkpoint state. `thread_id` is supplied in the LangGraph invocation configuration and scopes the PostgreSQL checkpoint sequence.
 
-### Initial graph
+### Current graph
 
 ```mermaid
 flowchart LR
-    Start([START]) --> Validate[Validate and complete constraints]
-    Validate --> LoadMemory[Load confirmed preferences]
-    LoadMemory --> Agent[Travel Agent]
-    Agent -->|Needs tools| Tools[ToolNode]
-    Tools --> Agent
-    Agent -->|Missing information| Clarify[Clarifying question]
-    Agent -->|Draft complete| Compose[Create sourced advice]
-    Clarify --> End([END])
-    Compose --> Persist[Persist summary and audit]
-    Persist --> End
+    Start([START]) --> Agent[Travel Agent]
+    Agent --> End([END])
 ```
 
-- `validate`: validates destination, dates, budget, and other constraints. It asks a clarifying question instead of calling external tools when essential details are missing.
-- `load_memory`: reads confirmed preferences for the authenticated user; it is skipped when that user has no confirmed preferences.
-- `agent`: selects tools and plans the next step. It may only call registered tools.
-- `tools`: runs through LangGraph `ToolNode`; tool failures are returned as recoverable results to the Agent. Transient network failures have bounded retries and timeouts.
-- `compose`: produces advice, rationale, citations, data freshness, and uncertainty notices.
-- `persist`: writes messages, run summaries, and audit records idempotently.
+For every submitted user message, the Agent restores its `thread_id` history, prepends `TRAVEL_ASSISTANT_SYSTEM_PROMPT`, invokes the configured primary model (and optional fallback), then appends its reply to the checkpoint. The API service persists the same user/assistant transcript and run record outside the graph.
+
+There is intentionally no pre-validation, memory-loading node, `ToolNode`, router, `interrupt()`, or SSE node in this phase. The model may ask its own clarifying questions using the system prompt and conversation history.
+
+### Single-Agent evolution rules
+
+All later milestones preserve the graph above. The implementation may extend the Agent system prompt and pass bounded, server-owned runtime context such as confirmed preferences, locale, or a prepared itinerary draft, but it must not add graph nodes, conditional edges, `ToolNode`, `Send`, or a multi-Agent supervisor.
+
+Messages, run records, preferences, confirmations, and future itinerary versions remain application-owned data. Their APIs and services perform authorization, validation, auditing, and persistence before or after the one Agent invocation. A model proposal is never treated as a confirmed preference or an irreversible action.
 
 ### Human confirmation
 
-The graph may pause with `interrupt()` before saving preferences, generating a shareable itinerary, exporting a file, or performing any future booking action. Pauses require persistent checkpoints and the same `thread_id` to resume. Side effects before the pause must be idempotent or split into a node after the pause.
+Preference writes, itinerary exports, sharing links, and any future booking action require explicit API-level confirmation. The confirmation state is persisted by application services; it does not use a LangGraph `interrupt()` node. No irreversible side effect occurs before confirmation.
 
 ## 8. API design (v1)
 

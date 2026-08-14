@@ -37,10 +37,11 @@ The first P2 Agent endpoint is available at
 `POST /api/v1/conversations/{conversation_id}/messages`. It accepts one new
 user message with a required `Idempotency-Key` and returns a non-streaming
 assistant completion. Configure `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and
-`DEFAULT_LLM_MODEL` before submitting messages. The initial Agent uses a
-single system prompt and the checkpointed conversation history to reply to
-every message. SSE, provider tools, and `/resume` follow in later P2
-increments.
+`DEFAULT_LLM_MODEL` before submitting messages. Optionally configure
+`FALLBACK_LLM_MODEL` on the same OpenAI-compatible endpoint; it is attempted
+only if the primary model call fails. The initial Agent uses a single system
+prompt and the checkpointed conversation history to reply to every message.
+SSE, provider tools, and `/resume` follow in later P2 increments.
 
 Login and refresh return a 15-minute bearer access token. Login also sets a rotating,
 30-day HttpOnly refresh-token cookie. Configure `CORS_ALLOWED_ORIGINS`, replace the two

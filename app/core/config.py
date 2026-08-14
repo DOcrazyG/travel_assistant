@@ -83,6 +83,7 @@ class Settings(BaseSettings):
     openai_api_key: SecretStr | None = Field(default=None)
     openai_base_url: str | None = Field(default=None)
     default_llm_model: str | None = Field(default=None, max_length=200)
+    fallback_llm_model: str | None = Field(default=None, max_length=200)
     llm_timeout_seconds: float = Field(default=30, gt=0, le=300)
     llm_max_retries: int = Field(default=2, ge=0, le=5)
     pii_hash_key: str = Field(
