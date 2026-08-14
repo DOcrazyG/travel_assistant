@@ -1,6 +1,7 @@
 """Pydantic request and response schemas exposed by the API."""
 
 from app.schemas.auth import AccessTokenResponse, LoginRequest
+from app.schemas.conversation_requests import ConversationMessageCreateRequest
 from app.schemas.conversations import (
     ConversationCreate,
     ConversationDetail,
@@ -11,6 +12,7 @@ from app.schemas.conversations import (
 )
 from app.schemas.messages import MessageCreate, MessagePage, MessageRead, MessageUpdate
 from app.schemas.pagination import OffsetPage
+from app.schemas.responses import ConversationResponse, ResponseCreateParams
 from app.schemas.users import UserCreate, UserRead, UserUpdate
 
 __all__ = [
@@ -18,7 +20,9 @@ __all__ = [
     "ConversationCreate",
     "ConversationDetail",
     "ConversationPage",
+    "ConversationMessageCreateRequest",
     "ConversationRead",
+    "ConversationResponse",
     "ConversationUpdate",
     "ErrorResponse",
     "LoginRequest",
@@ -27,6 +31,7 @@ __all__ = [
     "MessageRead",
     "MessageUpdate",
     "OffsetPage",
+    "ResponseCreateParams",
     "UserCreate",
     "UserRead",
     "UserUpdate",

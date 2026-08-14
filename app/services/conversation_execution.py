@@ -32,11 +32,20 @@ class ConversationExecutionResult:
 
 
 @dataclass(frozen=True)
+class ConversationTurn:
+    """Durable records allocated before the Agent starts generating."""
+
+    run: AgentRun
+    assistant_message: Message
+
+
+@dataclass(frozen=True)
 class ConversationStreamEvent:
     """One lifecycle event emitted while a single Agent reply is streamed."""
 
     event: Literal["status", "token", "final"]
     run: AgentRun
+    message: Message
     delta: str | None = None
     result: ConversationExecutionResult | None = None
 
@@ -72,7 +81,7 @@ class ConversationExecutionService:
     ) -> ConversationExecutionResult:
         """Store one user message, run the graph, and persist its assistant reply."""
 
-        run = await self._begin_turn(conversation=conversation, content=content)
+        turn = await self._begin_turn(conversation=conversation, content=content)
         config: RunnableConfig = {"configurable": {"thread_id": str(conversation.thread_id)}}
         context = TravelAgentContext(
             user_id=user_id,
@@ -86,9 +95,13 @@ class ConversationExecutionService:
                 context=context,
             )
             answer = str(state["final_answer"])
-            return await self._complete_turn(run=run, conversation=conversation, answer=answer)
+            return await self._complete_turn(
+                run=turn.run,
+                assistant=turn.assistant_message,
+                answer=answer,
+            )
         except Exception as error:
-            await self._mark_failed(run, error)
+            await self._mark_failed(turn, error)
             if isinstance(error, APIError):
                 raise
             raise
@@ -102,7 +115,7 @@ class ConversationExecutionService:
     ) -> AsyncIterator[ConversationStreamEvent]:
         """Stream token deltas while durably completing one conversation turn."""
 
-        run = await self._begin_turn(conversation=conversation, content=content)
+        turn = await self._begin_turn(conversation=conversation, content=content)
         config: RunnableConfig = {"configurable": {"thread_id": str(conversation.thread_id)}}
         context = TravelAgentContext(
             user_id=user_id,
@@ -110,7 +123,7 @@ class ConversationExecutionService:
             llm=self.llm,
             stream_tokens=True,
         )
-        yield ConversationStreamEvent(event="status", run=run)
+        yield ConversationStreamEvent(event="status", run=turn.run, message=turn.assistant_message)
         try:
             async for update in self.graph.astream(
                 {"messages": [{"role": "user", "content": content}]},
@@ -122,17 +135,31 @@ class ConversationExecutionService:
                     continue
                 delta = update.get("delta")
                 if isinstance(delta, str) and delta:
-                    yield ConversationStreamEvent(event="token", run=run, delta=delta)
+                    yield ConversationStreamEvent(
+                        event="token",
+                        run=turn.run,
+                        message=turn.assistant_message,
+                        delta=delta,
+                    )
             state = await self.graph.aget_state(config)
             answer = str(state.values["final_answer"])
-            result = await self._complete_turn(run=run, conversation=conversation, answer=answer)
-            yield ConversationStreamEvent(event="final", run=run, result=result)
+            result = await self._complete_turn(
+                run=turn.run,
+                assistant=turn.assistant_message,
+                answer=answer,
+            )
+            yield ConversationStreamEvent(
+                event="final",
+                run=turn.run,
+                message=result.message,
+                result=result,
+            )
         except Exception as error:
-            await self._mark_failed(run, error)
+            await self._mark_failed(turn, error)
             raise
 
-    async def _begin_turn(self, *, conversation: Conversation, content: str) -> AgentRun:
-        """Persist a running record and user message before invoking the Agent."""
+    async def _begin_turn(self, *, conversation: Conversation, content: str) -> ConversationTurn:
+        """Persist a running record, user input, and in-progress assistant item."""
 
         run = AgentRun(
             conversation_id=conversation.id,
@@ -153,6 +180,17 @@ class ConversationExecutionService:
                     agent_run_id=run.id,
                 ),
             )
+            assistant = await self._append_message(
+                conversation,
+                MessageCreate(
+                    sequence=conversation.latest_message_sequence + 1,
+                    role="assistant",
+                    content=[],
+                    content_status="partial",
+                    agent_run_id=run.id,
+                    model_alias="travel-assistant",
+                ),
+            )
             await self.session.commit()
         except IntegrityError as error:
             await self.session.rollback()
@@ -162,28 +200,23 @@ class ConversationExecutionService:
                 "A response is already being generated for this conversation.",
             ) from error
         bind_context(run_id=str(run.id), thread_id=str(conversation.thread_id))
-        return run
+        return ConversationTurn(run=run, assistant_message=assistant)
 
     async def _complete_turn(
         self,
         *,
         run: AgentRun,
-        conversation: Conversation,
+        assistant: Message,
         answer: str,
     ) -> ConversationExecutionResult:
         """Persist one completed assistant reply and close its run."""
 
-        assistant = await self._append_message(
-            conversation,
-            MessageCreate(
-                sequence=conversation.latest_message_sequence + 1,
-                role="assistant",
-                content=[{"type": "text", "text": answer}],
-                rendered_text=answer,
-                agent_run_id=run.id,
-                model_alias="travel-assistant",
-            ),
-        )
+        assistant.content = [{"type": "text", "text": answer}]
+        assistant.rendered_text = answer
+        assistant.content_status = "complete"
+        assistant.model_alias = "travel-assistant"
+        assistant.updated_at = _now()
+        self.session.add(assistant)
         run.status = "completed"
         run.completed_at = _now()
         self.session.add(run)
@@ -205,10 +238,14 @@ class ConversationExecutionService:
         self.session.add(conversation)
         return message
 
-    async def _mark_failed(self, run: AgentRun, error: Exception) -> None:
+    async def _mark_failed(self, turn: ConversationTurn, error: Exception) -> None:
         """Leave a traceable terminal run record when graph execution raises."""
 
         await self.session.rollback()
+        turn.assistant_message.content_status = "failed"
+        turn.assistant_message.updated_at = _now()
+        self.session.add(turn.assistant_message)
+        run = turn.run
         run.status = "failed"
         run.completed_at = _now()
         if isinstance(error, APIError):

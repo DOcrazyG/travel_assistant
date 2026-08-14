@@ -2,11 +2,12 @@
 
 import json
 from collections.abc import AsyncIterator, Sequence
-from typing import Annotated, Any
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.errors import APIError
@@ -18,9 +19,11 @@ from app.dependencies.services import (
     get_conversation_execution_service,
     get_idempotency_service,
 )
+from app.models.agent_runs import AgentRun
 from app.models.conversations import Conversation
 from app.models.messages import Message
 from app.models.users import User
+from app.schemas.conversation_requests import ConversationMessageCreateRequest
 from app.schemas.conversations import (
     ConversationCreate,
     ConversationDetail,
@@ -30,10 +33,27 @@ from app.schemas.conversations import (
 from app.schemas.messages import (
     MessagePage,
     MessageRead,
-    MessageSubmission,
-    MessageSubmissionResponse,
 )
 from app.schemas.pagination import OffsetPage
+from app.schemas.responses import (
+    ConversationResponse,
+    ErrorEvent,
+    ResponseCompletedEvent,
+    ResponseContentPartAddedEvent,
+    ResponseContentPartDoneEvent,
+    ResponseConversation,
+    ResponseCreatedEvent,
+    ResponseFailedEvent,
+    ResponseInProgressEvent,
+    ResponseOutputItem,
+    ResponseOutputItemAddedEvent,
+    ResponseOutputItemDoneEvent,
+    ResponseOutputMessage,
+    ResponseOutputText,
+    ResponseOutputTextDeltaEvent,
+    ResponseOutputTextDoneEvent,
+    ResponseStatus,
+)
 from app.services.conversation_execution import ConversationExecutionService
 from app.services.crud.conversations import ConversationCRUD
 from app.services.crud.messages import MessageCRUD
@@ -57,10 +77,12 @@ def _replay_failure(reservation: IdempotencyReservation) -> None:
     )
 
 
-def _sse_event(event: str, data: dict[str, Any]) -> str:
-    """Serialize one safe Server-Sent Event payload."""
+def _sse_event(event: BaseModel) -> str:
+    """Serialize one typed Responses-style Server-Sent Event payload."""
 
-    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+    payload = event.model_dump(mode="json")
+    event_type = str(payload["type"])
+    return f"event: {event_type}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
 def _sse_response(events: AsyncIterator[str]) -> StreamingResponse:
@@ -91,6 +113,42 @@ def _message_page(
     return MessagePage(
         data=[MessageRead.model_validate(item) for item in items],
         page=OffsetPage(offset=offset, limit=limit, next_offset=next_offset),
+    )
+
+
+def _response_output(message: Message, *, status: str) -> ResponseOutputMessage:
+    """Map the canonical transcript record to the text output item public API."""
+
+    item_status = "completed" if status == "completed" else "incomplete"
+    if status == "in_progress":
+        item_status = "in_progress"
+    return ResponseOutputMessage(
+        id=message.id,
+        status=item_status,
+        content=[ResponseOutputText(text=message.rendered_text or "")],
+    )
+
+
+def _response(
+    *,
+    conversation: Conversation,
+    run: AgentRun,
+    status_value: ResponseStatus,
+    message: Message | None = None,
+) -> ConversationResponse:
+    """Create the stable public Response envelope from application records."""
+
+    created_at = int(run.created_at.timestamp())
+    output: list[ResponseOutputItem] = (
+        [] if message is None else [_response_output(message, status=status_value)]
+    )
+    return ConversationResponse(
+        id=run.id,
+        created_at=created_at,
+        model=run.model_alias or "travel-assistant",
+        status=status_value,
+        output=output,
+        conversation=ResponseConversation(id=conversation.id),
     )
 
 
@@ -201,13 +259,13 @@ async def list_messages(
 
 @router.post(
     "/{conversation_id}/messages",
-    response_model=MessageSubmissionResponse,
+    response_model=ConversationResponse,
     status_code=status.HTTP_200_OK,
     dependencies=[Depends(limit_conversation_write)],
 )
 async def submit_message(
     conversation_id: UUID,
-    payload: MessageSubmission,
+    payload: ConversationMessageCreateRequest,
     request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
     current_user: Annotated[User, Depends(get_current_user)],
@@ -216,13 +274,19 @@ async def submit_message(
     ],
     idempotency_service: Annotated[IdempotencyService, Depends(get_idempotency_service)],
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
-) -> MessageSubmissionResponse | StreamingResponse:
-    """Run one idempotent Agent turn as JSON or an SSE token stream."""
+) -> ConversationResponse | StreamingResponse:
+    """Create one Responses-style Agent turn as JSON or an SSE event stream."""
 
     conversation = await _crud(session, current_user).require(conversation_id)
     _bind_conversation_context(request, conversation)
     if idempotency_key is None:
         raise APIError(400, "missing_idempotency_key", "Idempotency-Key is required.")
+    if not payload.input.is_text_only:
+        raise APIError(
+            422,
+            "input_content_not_supported",
+            "Image and file inputs are defined by the API but not enabled by the current Agent.",
+        )
     reservation = await idempotency_service.begin(
         user_id=current_user.id,
         http_method=request.method,
@@ -232,17 +296,11 @@ async def submit_message(
     )
     if reservation.replay:
         _replay_failure(reservation)
-        replay = MessageSubmissionResponse.model_validate(reservation.record.response_snapshot)
+        replay = ConversationResponse.model_validate(reservation.record.response_snapshot)
         if payload.stream:
 
             async def replay_events() -> AsyncIterator[str]:
-                yield _sse_event(
-                    "final",
-                    {
-                        "request_id": str(getattr(request.state, "request_id", "")),
-                        **replay.model_dump(mode="json"),
-                    },
-                )
+                yield _sse_event(ResponseCompletedEvent(sequence_number=0, response=replay))
 
             return _sse_response(replay_events())
         return replay
@@ -250,27 +308,67 @@ async def submit_message(
     if payload.stream:
 
         async def stream_events() -> AsyncIterator[str]:
-            request_id = str(getattr(request.state, "request_id", ""))
+            sequence_number = 0
+            active_response: ConversationResponse | None = None
+            active_message: Message | None = None
             try:
                 async for event in execution_service.stream(
                     conversation=conversation,
                     user_id=current_user.id,
-                    content=payload.content,
+                    content=payload.input.rendered_text,
                 ):
-                    common = {
-                        "request_id": request_id,
-                        "conversation_id": str(conversation.id),
-                        "run_id": str(event.run.id),
-                    }
                     if event.event == "status":
-                        yield _sse_event("status", {**common, "status": "running"})
+                        active_message = event.message
+                        active_response = _response(
+                            conversation=conversation,
+                            run=event.run,
+                            status_value="in_progress",
+                        )
+                        yield _sse_event(
+                            ResponseCreatedEvent(
+                                sequence_number=sequence_number,
+                                response=active_response,
+                            )
+                        )
+                        sequence_number += 1
+                        yield _sse_event(
+                            ResponseInProgressEvent(
+                                sequence_number=sequence_number,
+                                response=active_response,
+                            )
+                        )
+                        sequence_number += 1
+                        output_item = _response_output(event.message, status="in_progress")
+                        yield _sse_event(
+                            ResponseOutputItemAddedEvent(
+                                sequence_number=sequence_number,
+                                item=output_item,
+                            )
+                        )
+                        sequence_number += 1
+                        yield _sse_event(
+                            ResponseContentPartAddedEvent(
+                                sequence_number=sequence_number,
+                                item_id=event.message.id,
+                                part=ResponseOutputText(text=""),
+                            )
+                        )
+                        sequence_number += 1
                     elif event.event == "token" and event.delta is not None:
-                        yield _sse_event("token", {**common, "delta": event.delta})
+                        yield _sse_event(
+                            ResponseOutputTextDeltaEvent(
+                                sequence_number=sequence_number,
+                                item_id=event.message.id,
+                                delta=event.delta,
+                            )
+                        )
+                        sequence_number += 1
                     elif event.event == "final" and event.result is not None:
-                        response = MessageSubmissionResponse(
-                            conversation_id=conversation.id,
-                            run_id=event.result.run.id,
-                            message=MessageRead.model_validate(event.result.message),
+                        response = _response(
+                            conversation=conversation,
+                            run=event.result.run,
+                            status_value="completed",
+                            message=event.result.message,
                         )
                         await idempotency_service.complete(
                             reservation.record,
@@ -279,7 +377,37 @@ async def submit_message(
                             conversation_id=conversation.id,
                             agent_run_id=event.result.run.id,
                         )
-                        yield _sse_event("final", {**common, **response.model_dump(mode="json")})
+                        answer = event.result.message.rendered_text or ""
+                        yield _sse_event(
+                            ResponseOutputTextDoneEvent(
+                                sequence_number=sequence_number,
+                                item_id=event.result.message.id,
+                                text=answer,
+                            )
+                        )
+                        sequence_number += 1
+                        output_item = _response_output(event.result.message, status="completed")
+                        yield _sse_event(
+                            ResponseContentPartDoneEvent(
+                                sequence_number=sequence_number,
+                                item_id=event.result.message.id,
+                                part=output_item.content[0],
+                            )
+                        )
+                        sequence_number += 1
+                        yield _sse_event(
+                            ResponseOutputItemDoneEvent(
+                                sequence_number=sequence_number,
+                                item=output_item,
+                            )
+                        )
+                        sequence_number += 1
+                        yield _sse_event(
+                            ResponseCompletedEvent(
+                                sequence_number=sequence_number,
+                                response=response,
+                            )
+                        )
             except APIError as error:
                 await idempotency_service.fail(
                     reservation.record,
@@ -290,13 +418,25 @@ async def submit_message(
                         "details": error.details,
                     },
                 )
+                if active_response is not None:
+                    yield _sse_event(
+                        ResponseFailedEvent(
+                            sequence_number=sequence_number,
+                            response=_response(
+                                conversation=conversation,
+                                run=event.run,
+                                status_value="failed",
+                                message=active_message,
+                            ),
+                        )
+                    )
+                    sequence_number += 1
                 yield _sse_event(
-                    "error",
-                    {
-                        "request_id": request_id,
-                        "code": error.code,
-                        "message": error.message,
-                    },
+                    ErrorEvent(
+                        sequence_number=sequence_number,
+                        code=error.code,
+                        message=error.message,
+                    )
                 )
             except Exception:
                 await idempotency_service.fail(
@@ -307,13 +447,25 @@ async def submit_message(
                         "message": "An unexpected error occurred.",
                     },
                 )
+                if active_response is not None:
+                    yield _sse_event(
+                        ResponseFailedEvent(
+                            sequence_number=sequence_number,
+                            response=_response(
+                                conversation=conversation,
+                                run=event.run,
+                                status_value="failed",
+                                message=active_message,
+                            ),
+                        )
+                    )
+                    sequence_number += 1
                 yield _sse_event(
-                    "error",
-                    {
-                        "request_id": request_id,
-                        "code": "internal_error",
-                        "message": "An unexpected error occurred.",
-                    },
+                    ErrorEvent(
+                        sequence_number=sequence_number,
+                        code="internal_error",
+                        message="An unexpected error occurred.",
+                    )
                 )
 
         return _sse_response(stream_events())
@@ -322,7 +474,7 @@ async def submit_message(
         result = await execution_service.execute(
             conversation=conversation,
             user_id=current_user.id,
-            content=payload.content,
+            content=payload.input.rendered_text,
         )
     except APIError as error:
         await idempotency_service.fail(
@@ -345,10 +497,11 @@ async def submit_message(
             },
         )
         raise
-    response = MessageSubmissionResponse(
-        conversation_id=conversation.id,
-        run_id=result.run.id,
-        message=MessageRead.model_validate(result.message),
+    response = _response(
+        conversation=conversation,
+        run=result.run,
+        status_value="completed",
+        message=result.message,
     )
     await idempotency_service.complete(
         reservation.record,

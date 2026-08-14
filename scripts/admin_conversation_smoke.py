@@ -171,29 +171,42 @@ def run(base_url: str) -> int:
             base_url,
             "POST",
             f"/api/v1/conversations/{conversation_id}/messages",
-            body={"content": user_input, "stream": True},
+            body={
+                "input": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": user_input}],
+                },
+                "stream": True,
+            },
             headers={**authorization, "Idempotency-Key": str(uuid4())},
         ):
-            if event == "token":
+            if event == "response.output_text.delta":
                 delta = payload.get("delta")
                 if isinstance(delta, str):
                     if not received_tokens:
-                        prefix = f"assistant [{payload.get('run_id', 'unknown')}]> "
+                        prefix = f"assistant [{payload.get('item_id', 'unknown')}]> "
                         print(prefix, end="", flush=True)
                         received_tokens = True
                     print(delta, end="", flush=True)
-            elif event == "final":
+            elif event == "response.completed":
                 if received_tokens:
                     print()
                     continue
-                message = payload.get("message")
-                if not isinstance(message, dict):
-                    raise APIRequestError("SSE final event lacked an assistant message.")
-                answer = message.get("rendered_text")
+                response = payload.get("response")
+                if not isinstance(response, dict):
+                    raise APIRequestError("SSE completion event lacked a response object.")
+                output = response.get("output")
+                if not isinstance(output, list) or not output or not isinstance(output[0], dict):
+                    raise APIRequestError("SSE completion event lacked an assistant output item.")
+                content = output[0].get("content")
+                if not isinstance(content, list) or not content or not isinstance(content[0], dict):
+                    raise APIRequestError("SSE completion event lacked assistant output text.")
+                answer = content[0].get("text")
                 rendered_answer = (
-                    answer if isinstance(answer, str) else json.dumps(message, ensure_ascii=False)
+                    answer if isinstance(answer, str) else json.dumps(response, ensure_ascii=False)
                 )
-                print(f"assistant [{payload.get('run_id', 'unknown')}]> {rendered_answer}")
+                print(f"assistant [{response.get('id', 'unknown')}]> {rendered_answer}")
             elif event == "error":
                 raise APIRequestError(
                     f"Stream failed: {payload.get('code', 'unknown_error')} — "

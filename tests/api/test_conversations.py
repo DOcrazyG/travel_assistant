@@ -226,17 +226,24 @@ async def test_message_submission_requires_idempotency_and_returns_a_durable_com
     app.dependency_overrides[get_idempotency_service] = idempotency_service_override
     transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
     path = f"/api/v1/conversations/{service.conversation.id}/messages"
+    payload = {
+        "input": {
+            "role": "user",
+            "content": [{"type": "input_text", "text": "你好"}],
+        }
+    }
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
-        missing_key = await client.post(path, json={"content": "你好"})
+        missing_key = await client.post(path, json=payload)
         accepted = await client.post(
             path,
-            json={"content": "你好"},
+            json=payload,
             headers={"Idempotency-Key": "message-001"},
         )
 
     assert missing_key.status_code == 400
     assert missing_key.json()["code"] == "missing_idempotency_key"
     assert accepted.status_code == 200
-    assert accepted.json()["conversation_id"] == str(service.conversation.id)
-    assert accepted.json()["message"]["rendered_text"] == "回复：你好"
+    assert accepted.json()["conversation"]["id"] == str(service.conversation.id)
+    assert accepted.json()["status"] == "completed"
+    assert accepted.json()["output"][0]["content"][0]["text"] == "回复：你好"
     assert "post" in app.openapi()["paths"]["/api/v1/conversations/{conversation_id}/messages"]

@@ -196,10 +196,15 @@ async def test_message_completion_and_history_survive_an_application_restart(
         completion = await client.post(
             f"/api/v1/conversations/{conversation_id}/messages",
             headers={**bearer(token), "Idempotency-Key": "restart-completion-001"},
-            json={"content": "你好，请推荐上海旅行"},
+            json={
+                "input": {
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "你好，请推荐上海旅行"}],
+                }
+            },
         )
         assert completion.status_code == 200, completion.text
-        assert completion.json()["message"]["rendered_text"] == "这是持久化的助手回复。"
+        assert completion.json()["output"][0]["content"][0]["text"] == "这是持久化的助手回复。"
 
     second_llm = FakeLLM()
     async with api_client(integration_settings, llm=second_llm) as restarted_client:
@@ -210,7 +215,12 @@ async def test_message_completion_and_history_survive_an_application_restart(
         follow_up = await restarted_client.post(
             f"/api/v1/conversations/{conversation_id}/messages",
             headers={**bearer(token), "Idempotency-Key": "restart-completion-002"},
-            json={"content": "预算控制在一千元以内"},
+            json={
+                "input": {
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "预算控制在一千元以内"}],
+                }
+            },
         )
 
     assert history.status_code == 200
@@ -234,7 +244,12 @@ async def test_failed_completion_is_replayed_as_the_same_safe_error(
         assert created.status_code == 201, created.text
         path = f"/api/v1/conversations/{created.json()['id']}/messages"
         headers = {**bearer(token), "Idempotency-Key": "unavailable-completion-001"}
-        payload = {"content": "请安排旅行"}
+        payload = {
+            "input": {
+                "role": "user",
+                "content": [{"type": "input_text", "text": "请安排旅行"}],
+            }
+        }
 
         first = await client.post(path, headers=headers, json=payload)
         replay = await client.post(path, headers=headers, json=payload)
@@ -257,7 +272,13 @@ async def test_message_submission_streams_tokens_and_persists_the_final_reply(
         response = await client.post(
             f"/api/v1/conversations/{conversation_id}/messages",
             headers={**bearer(token), "Idempotency-Key": "stream-completion-001"},
-            json={"content": "请推荐上海旅行", "stream": True},
+            json={
+                "input": {
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "请推荐上海旅行"}],
+                },
+                "stream": True,
+            },
         )
         history = await client.get(
             f"/api/v1/conversations/{conversation_id}/messages",
@@ -266,11 +287,11 @@ async def test_message_submission_streams_tokens_and_persists_the_final_reply(
 
     assert response.status_code == 200, response.text
     assert response.headers["content-type"].startswith("text/event-stream")
-    assert "event: status" in response.text
-    assert "event: token" in response.text
+    assert "event: response.created" in response.text
+    assert "event: response.output_text.delta" in response.text
     assert '"delta": "这是"' in response.text
     assert '"delta": "流式助手回复。"' in response.text
-    assert "event: final" in response.text
+    assert "event: response.completed" in response.text
     assert history.status_code == 200
     assert [message["rendered_text"] for message in history.json()["data"]] == [
         "请推荐上海旅行",
