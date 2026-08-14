@@ -9,6 +9,7 @@ import pytest
 from langchain_core.messages import AIMessage, BaseMessage
 
 from app.core.config import Settings
+from app.core.errors import APIError
 from app.main import create_app
 
 pytestmark = pytest.mark.integration
@@ -61,8 +62,19 @@ def bearer(token: str) -> dict[str, str]:
 class FakeLLM:
     """Avoid external provider calls while testing the durable message boundary."""
 
-    async def ainvoke(self, _: list[BaseMessage]) -> BaseMessage:
+    def __init__(self) -> None:
+        self.calls: list[list[BaseMessage]] = []
+
+    async def ainvoke(self, messages: list[BaseMessage]) -> BaseMessage:
+        self.calls.append(messages)
         return AIMessage(content="这是持久化的助手回复。")
+
+
+class UnavailableLLM:
+    """Return an expected provider failure without making a network call."""
+
+    async def ainvoke(self, _: list[BaseMessage]) -> BaseMessage:
+        raise APIError(503, "llm_unavailable", "The travel model is temporarily unavailable.")
 
 
 @pytest.mark.anyio
@@ -169,7 +181,8 @@ async def test_conversation_survives_an_application_restart(
 async def test_message_completion_and_history_survive_an_application_restart(
     integration_settings: Settings,
 ) -> None:
-    async with api_client(integration_settings, llm=FakeLLM()) as client:
+    first_llm = FakeLLM()
+    async with api_client(integration_settings, llm=first_llm) as client:
         token = await access_token(client)
         created = await client.post("/api/v1/conversations", headers=bearer(token), json={})
         assert created.status_code == 201, created.text
@@ -177,16 +190,52 @@ async def test_message_completion_and_history_survive_an_application_restart(
         completion = await client.post(
             f"/api/v1/conversations/{conversation_id}/messages",
             headers={**bearer(token), "Idempotency-Key": "restart-completion-001"},
-            json={"content": "你好，请推荐上海旅行"},
+            json={"content": "你好，请推荐上海2026年10月旅行"},
         )
         assert completion.status_code == 200, completion.text
         assert completion.json()["message"]["rendered_text"] == "这是持久化的助手回复。"
 
-    async with api_client(integration_settings, llm=FakeLLM()) as restarted_client:
+    second_llm = FakeLLM()
+    async with api_client(integration_settings, llm=second_llm) as restarted_client:
         history = await restarted_client.get(
             f"/api/v1/conversations/{conversation_id}/messages",
             headers=bearer(token),
         )
+        follow_up = await restarted_client.post(
+            f"/api/v1/conversations/{conversation_id}/messages",
+            headers={**bearer(token), "Idempotency-Key": "restart-completion-002"},
+            json={"content": "预算控制在一千元以内"},
+        )
 
     assert history.status_code == 200
     assert [message["role"] for message in history.json()["data"]] == ["user", "assistant"]
+    assert follow_up.status_code == 200, follow_up.text
+    assert [message.content for message in second_llm.calls[0]] == [
+        "You are a travel assistant. Respond in the user's language. "
+        "State uncertainty clearly and never invent sources, current weather, "
+        "opening hours, or booking availability.",
+        "你好，请推荐上海2026年10月旅行",
+        "这是持久化的助手回复。",
+        "预算控制在一千元以内",
+    ]
+
+
+@pytest.mark.anyio
+async def test_failed_completion_is_replayed_as_the_same_safe_error(
+    integration_settings: Settings,
+) -> None:
+    async with api_client(integration_settings, llm=UnavailableLLM()) as client:
+        token = await access_token(client)
+        created = await client.post("/api/v1/conversations", headers=bearer(token), json={})
+        assert created.status_code == 201, created.text
+        path = f"/api/v1/conversations/{created.json()['id']}/messages"
+        headers = {**bearer(token), "Idempotency-Key": "unavailable-completion-001"}
+        payload = {"content": "请安排上海2026年10月旅行"}
+
+        first = await client.post(path, headers=headers, json=payload)
+        replay = await client.post(path, headers=headers, json=payload)
+
+    assert first.status_code == 503
+    assert first.json()["code"] == "llm_unavailable"
+    assert replay.status_code == 503
+    assert replay.json()["code"] == "llm_unavailable"

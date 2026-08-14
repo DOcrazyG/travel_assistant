@@ -57,5 +57,17 @@ async def test_complete_request_uses_llm_and_persists_the_latest_turn_in_one_thr
 
     assert state["final_answer"].startswith("上海周末")
     assert len(llm.calls) == 2
+    assert [message.content for message in llm.calls[1]] == [
+        "You are a travel assistant. Respond in the user's language. "
+        "State uncertainty clearly and never invent sources, current weather, "
+        "opening hours, or booking availability.",
+        "请安排上海周末行程",
+        "上海周末可以先游览外滩，再根据天气调整行程。",
+        "预算控制在一千元以内",
+    ]
     checkpoint = await graph.aget_state(config)
     assert checkpoint.values["final_answer"] == state["final_answer"]
+    assert checkpoint.values["messages"][-1] == {
+        "role": "assistant",
+        "content": state["final_answer"],
+    }

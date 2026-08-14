@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import operator
 from dataclasses import dataclass
-from typing import Literal, Protocol, cast
+from typing import Annotated, Literal, Protocol, cast
 from uuid import UUID
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
@@ -42,12 +43,12 @@ class GraphMessage(TypedDict):
 class TravelAgentState(TypedDict, total=False):
     """Recoverable state for the initial travel-advice graph.
 
-    ``messages`` is the complete serializable checkpoint sequence. The execution
-    service includes prior messages when submitting the next turn, avoiding an
-    async reducer issue in the pinned LangGraph release.
+    ``messages`` is the complete serializable checkpoint sequence. The reducer
+    appends each newly accepted user message and composed assistant reply, so a
+    caller submits only the new turn while LangGraph retains canonical context.
     """
 
-    messages: list[GraphMessage]
+    messages: Annotated[list[GraphMessage], operator.add]
     missing_fields: list[str]
     draft_answer: str
     final_answer: str
@@ -169,7 +170,11 @@ def compose(state: TravelAgentState) -> dict[str, object]:
         answer = f"为了给出可靠建议，请先告诉我{requested}。"
     else:
         answer = state.get("draft_answer", "我暂时无法生成可用回复，请稍后重试。")
-    return {"final_answer": answer, "run_status": "completed"}
+    return {
+        "messages": [{"role": "assistant", "content": answer}],
+        "final_answer": answer,
+        "run_status": "completed",
+    }
 
 
 def persist(state: TravelAgentState) -> dict[str, str]:

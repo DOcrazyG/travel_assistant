@@ -35,9 +35,24 @@ from app.schemas.pagination import OffsetPage
 from app.services.conversation_execution import ConversationExecutionService
 from app.services.crud.conversations import ConversationCRUD
 from app.services.crud.messages import MessageCRUD
-from app.services.idempotency import IdempotencyService
+from app.services.idempotency import IdempotencyReservation, IdempotencyService
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
+
+
+def _replay_failure(reservation: IdempotencyReservation) -> None:
+    """Raise the safe terminal error stored for an idempotent replay."""
+
+    record = reservation.record
+    if record.status != "failed":
+        return
+    snapshot = record.response_snapshot or {}
+    raise APIError(
+        record.response_status or status.HTTP_500_INTERNAL_SERVER_ERROR,
+        str(snapshot.get("code", "internal_error")),
+        str(snapshot.get("message", "An unexpected error occurred.")),
+        details=snapshot.get("details"),
+    )
 
 
 def _conversation_read(conversation: object) -> ConversationRead:
@@ -198,13 +213,36 @@ async def submit_message(
         payload=payload.model_dump(mode="json"),
     )
     if reservation.replay:
+        _replay_failure(reservation)
         return MessageSubmissionResponse.model_validate(reservation.record.response_snapshot)
 
-    result = await execution_service.execute(
-        conversation=conversation,
-        user_id=current_user.id,
-        content=payload.content,
-    )
+    try:
+        result = await execution_service.execute(
+            conversation=conversation,
+            user_id=current_user.id,
+            content=payload.content,
+        )
+    except APIError as error:
+        await idempotency_service.fail(
+            reservation.record,
+            response_status=error.status_code,
+            response_snapshot={
+                "code": error.code,
+                "message": error.message,
+                "details": error.details,
+            },
+        )
+        raise
+    except Exception:
+        await idempotency_service.fail(
+            reservation.record,
+            response_status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            response_snapshot={
+                "code": "internal_error",
+                "message": "An unexpected error occurred.",
+            },
+        )
+        raise
     response = MessageSubmissionResponse(
         conversation_id=conversation.id,
         run_id=result.run.id,

@@ -43,7 +43,7 @@ flowchart LR
 **Goal:** Provide stable conversation APIs and persistence boundaries before complex Agent behavior.
 
 - [x] Design Pydantic request and response schemas plus a unified error format.
-- [ ] Build `api/v1` routes for health checks, conversation creation and retrieval, message retrieval, and message submission. Conversation creation and history retrieval are complete; message submission remains part of the P2 Agent execution flow.
+- [x] Build `api/v1` routes for health checks, conversation creation and retrieval, message retrieval, and message submission. Message submission invokes the P2 Agent execution flow; streaming and resume remain P2 work.
 - [x] Add PostgreSQL, SQLModel/SQLAlchemy, and Alembic migrations for application-owned identity, conversation, message, run, tool-call, attachment, audit, and future-extension tables. The full schema is defined up front; product capabilities activate incrementally.
 - [x] Implement scoped CRUD service layers; route handlers must not construct SQL or call models directly. Conversation persistence remains in `app/services/crud/conversations.py`, without a duplicate repository layer.
 - [x] Choose the first identity model: multiple local email/password accounts with JWT; anonymous guest conversations and machine integrations are not supported. Create a public `conversation_id` mapped one-to-one to a stable internal `thread_id` for every conversation.
@@ -58,7 +58,7 @@ flowchart LR
 **Goal:** Implement a recoverable graph that replaces a manually managed Agent loop.
 
 - [ ] Define `TravelAgentState`, runtime context, and typed node input/output. Add reducers for messages, tool results, and citations.
-- [ ] Assemble `validate → load_memory → agent ↔ tools → compose → persist`. P2.0 has the state/context and a checkpointed non-streaming `validate → load_memory → agent → compose → persist` execution boundary; tools and list reducers remain pending.
+- [ ] Assemble `validate → load_memory → agent ↔ tools → compose → persist`. P2.0 has state/context, append-only message history, and a checkpointed non-streaming `validate → load_memory → agent → compose → persist` execution boundary; tools remain pending.
 - [ ] Implement weather and attraction tools with LangGraph `ToolNode` and LangChain `@tool` functions.
 - [ ] Build an LLM Service for OpenAI-compatible configuration, model registration, call timeouts, retries, and configurable fallback models.
 - [ ] Integrate LangGraph `PostgresSaver`; every graph call includes the conversation `thread_id`. Add recovery tests across service restarts.
